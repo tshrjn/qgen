@@ -1,0 +1,7 @@
+__pycache__/*
+*.txt
+*.json
+
+# saved model files
+model-*
+
