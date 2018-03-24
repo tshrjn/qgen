@@ -32,8 +32,8 @@ def look_up_token(token):
     return _idx_to_word[token]
 
 
-embeddings_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'glove.6B.100d.txt')
-with open(embeddings_path) as f:
+embeddings_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../glove.6B.300d.txt')
+with open(embeddings_path, encoding='utf-8') as f:
     line = f.readline()
     chunks = line.split(" ")
     dimensions = len(chunks) - 1
