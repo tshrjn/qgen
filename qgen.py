@@ -14,18 +14,15 @@ import re
 import numpy as np
 
 import torch
-try:
-    import nltk
-except:
-    import nltk
-    nltk.download('punkt')
-    nltk.download('stopwords')
+import nltk
+nltk.download('punkt')
+nltk.download('stopwords')
 
 
 # In[13]:
 
 
-data = json.load(open('../train-v1.1.json'))
+data = json.load(open('train-v1.1.json'))
 
 
 # In[14]:
@@ -489,7 +486,7 @@ def createBatch(inputs,batch_size,shuffle=False):
 # In[41]:
 
 
-batch_size = 4
+batch_size = 64
 batch_input = createBatch([document_tokens,document_lengths,answer_labels,answer_masks,answer_lengths,question_input_tokens,question_output_tokens,question_lengths,suppression_answer,expression_contexts,expression_probabilities]
                     ,batch_size)
 number_of_batches = len(batch_input[0])
@@ -643,6 +640,13 @@ criterion1 = nn.BCELoss()
 #criterion2 = nn.CrossEntropyLoss()
 criterion2 = nn.NLLLoss()
 
+def save():
+    torch.save({'answerEncoder': answerEncoder.state_dict(),
+                'questionEncoder': questionEncoder.state_dict(),
+                'questionDecoder': questionDecoder.state_dict(),
+                'questionGenerator': questionGenerator.state_dict(),
+                'optimizer': optimizer.state_dict(),
+                }, 'qgen_base.pt')
 
 # In[204]:
 
@@ -650,7 +654,7 @@ criterion2 = nn.NLLLoss()
 verboseBatchPrinting = True
 averageBatchLossPrinting = True
 
-num_epochs = 10
+num_epochs = 100
 answer_encoder_hidden = answerEncoder.initHidden()
 question_encoder_hidden = questionEncoder.initHidden()
 question_decoder_hidden = None
@@ -738,469 +742,23 @@ for epoch in range(1, num_epochs+1):
         net_loss = question_loss
         net_loss.backward(retain_graph=True)
         optimizer.step()
-        
+
+
         avg_loss+= net_loss.data[0]
         if verboseBatchPrinting:
             print ('Batch: %d \t Epoch : %d\tNet Loss: %.4f \tAnswer Loss: %.4f \tQuestion Loss: %.4f' 
                    %(batch_num, epoch, net_loss.data[0], answer_loss.data[0], question_loss.data[0]))
+
         
         
     if averageBatchLossPrinting:
         print('Average Loss after Epoch %d : %.4f'
                    %(epoch, avg_loss/number_of_batches))
 
+    if epoch % 2:
+        save()
 
-# In[195]:
 
 
-t_document_mask.size()
-
-
-# In[ ]:
-
-
-answer_tags.size()
-
-
-# In[ ]:
-
-
-criterion2(final_output.squeeze(0), output_label)
-
-
-# ### Answer Generation
-
-# In[ ]:
-
-
-if cellFlag == 'LSTM':
-    forward_cell = tf.contrib.rnn.LSTMCell(EMBEDDING_DIMENS)
-    backward_cell = tf.contrib.rnn.LSTMCell(EMBEDDING_DIMENS)
-elif cellFlag == 'GRU':
-    forward_cell = tf.contrib.rnn.GRUCell(EMBEDDING_DIMENS)
-    backward_cell = tf.contrib.rnn.GRUCell(EMBEDDING_DIMENS)
-
-answer_outputs, states = tf.nn.bidirectional_dynamic_rnn(
-    forward_cell, backward_cell, document_emb, d_lengths, dtype=tf.float64,
-    scope="answer_rnn")
-
-answer_outputs = tf.concat(answer_outputs, 2, name="answer_output_concat")
-
-answer_outputs = tf.cast(answer_outputs,tf.float32, name="answer_output_concat")
-
-answer_tags = tf.layers.dense(inputs=answer_outputs, units=2, name="answer_tags")
-
-
-answer_mask = tf.sequence_mask(d_lengths, dtype=tf.float32, name="answer_mask")
-
-answer_loss = seq2seq.sequence_loss(
-    logits=answer_tags, targets=a_labels, weights=answer_mask, name="answer_loss")
-
-answer_loss = tf.Print(answer_loss, [answer_loss], message="answer_loss: ")
-
-
-# ## Question Generation
-
-# ### Encoder
-
-# In[ ]:
-
-
-encoder_inputs = tf.matmul(encoder_input_mask, answer_outputs, name="encoder_inputs")
-encoder_lengths = tf.placeholder(tf.int32, shape=[None], name="encoder_lengths")
-
-if cellFlag == 'GRU':
-    encoder_cell = tf.contrib.rnn.GRUCell(forward_cell.state_size + backward_cell.state_size)
-elif cellFlag == 'LSTM':
-    encoder_cell = tf.contrib.rnn.LSTMCell(2 * EMBEDDING_DIMENS)
-
-
-
-# In[ ]:
-
-
-_, encoder_state = tf.nn.dynamic_rnn(
-    encoder_cell, encoder_inputs, encoder_lengths, dtype=tf.float32, scope="encoder_rnn")
-
-
-# ### Decoder
-
-# In[ ]:
-
-
-from tensorflow.python.layers.core import Dense
-
-decoder_emb = tf.nn.embedding_lookup(embedding, decoder_inputs,name="decoder_embedding")
-decoder_emb = tf.cast(decoder_emb,tf.float32,name="decoder_embedding_cast")
-
-helper = seq2seq.TrainingHelper(decoder_emb , decoder_lengths, name="helper")
-
-
-projection = Dense(embedding.shape[0], use_bias=False, name="projection")
-
-if cellFlag == 'GRU':
-    decoder_cell = tf.contrib.rnn.GRUCell(encoder_cell.state_size)
-elif cellFlag == "LSTM":
-    decoder_cell = tf.contrib.rnn.LSTMCell(2 * EMBEDDING_DIMENS)
-
-decoder = seq2seq.BasicDecoder(decoder_cell, helper, encoder_state, output_layer=projection)
-
-
-# In[ ]:
-
-
-decoder_outputs, _, _ = seq2seq.dynamic_decode(decoder, scope="decoder")
-decoder_outputs = decoder_outputs.rnn_output
-
-
-# In[ ]:
-
-
-encoder_state.get_shape()
-
-
-# ## Question Generation Loss
-
-# In[ ]:
-
-
-# NLL Loss
-question_mask = tf.sequence_mask(decoder_lengths ,dtype=tf.float32)
-question_loss = seq2seq.sequence_loss(
-    logits=decoder_outputs, targets=decoder_labels, weights=question_mask,
-    name="question_loss")
-question_loss = tf.Print(question_loss, [question_loss], message="question_loss: ")
-
-#Suppression Loss
-lambdaSuppress = 1
-
-suppression_loss = lambdaSuppress * tf.reduce_sum(tf.matmul(tf.nn.softmax(decoder_outputs), s_answer))
-suppression_loss = tf.Print(suppression_loss, [suppression_loss], message="suppression_loss: ")
-
-
-# In[ ]:
-
-
-#Expression Loss
-
-express_loss_f = tf.reduce_sum(-tf.log(tf.multiply(tf.sigmoid(decoder_outputs),e_context) + 10e-7))
-suppress_loss_f = tf.reduce_sum(-tf.log(tf.multiply((1 - tf.sigmoid(decoder_outputs)),(1 - e_context)) + 10e-7))
-expression_loss = (express_loss_f + suppress_loss_f)/(32 * 20 * wordToTake)
-expression_loss = tf.Print(expression_loss, [expression_loss], message="expression_loss: ")
-
-
-#Maximize Entropy Loss
-entropy_loss = tf.matmul(tf.transpose(dense_output),dense_output)
-print(dense_output.shape)
-# In[ ]:
-
-
-x = tf.stack([question_loss,answer_loss,suppression_loss,expression_loss])
-loss = tf.reduce_sum(tf.multiply(x, lossFlags))
-
-
-# In[ ]:
-
-
-def shuffle_list(*ls):
-    l =list(zip(*ls))
-    np.random.shuffle(l)
-    return zip(*l)
-
-
-# In[ ]:
-
-
-expression_contexts.shape
-
-
-# In[ ]:
-
-
-print("No of features:",len( batch_input))
-print("No of batches:",len( batch_input[0]))
-
-saved_vars = []
-l = len(tf.all_variables())
-for i,var in enumerate(tf.all_variables()):
-    print(i,"/",l)
-    saved_vars.append(var)
-        
-print(len(saved_vars))
-# In[ ]:
-
-
-optimizer = tf.train.AdamOptimizer(learning_rate=3e-3).minimize(loss)
-
-saver = tf.train.Saver()
-config = tf.ConfigProto()
-config.gpu_options.allow_growth = True
-session = tf.InteractiveSession(config=config)
-
-session.run(tf.global_variables_initializer())
-# session.run(tf.variables_initializer(saved_vars))
-
-
-# In[ ]:
-
-
-EPOCHS = 400
-loss_flag = np.array([1,1,1,1])
-
-import time
-
-for epoch in range(1, EPOCHS + 1):
-    batch_loss = 0
-    print("Epoch {0}".format(epoch))
-    start_time = time.time()
-    for batchNum in range(len(batch_input[0])):
-        print("Batch : ",batchNum)
-        t = session.run([optimizer, loss, question_loss, answer_loss, suppression_loss, expression_loss], {
-            d_tokens: batch_input[0][batchNum],
-            d_lengths: batch_input[1][batchNum],
-            a_labels: batch_input[2][batchNum],
-            encoder_input_mask: batch_input[3][batchNum],
-            encoder_lengths: batch_input[4][batchNum],
-            decoder_inputs: batch_input[5][batchNum],
-            decoder_labels: batch_input[6][batchNum],
-            decoder_lengths: batch_input[7][batchNum],
-            s_answer: batch_input[8][batchNum],
-            e_context: batch_input[9][batchNum],
-            e_probs: batch_input[10][batchNum],
-            lossFlags : loss_flag,
-        })
-        print("Loss: {0}".format(t[1]))
-        batch_loss += t[2]
-    batch_loss /= len(batch_input[0])
-    end_time = time.time()
-    print("Average Batch Question Loss: {0}".format(batch_loss))
-    print("Time taken to complete epoch : " , (end_time-start_time)/60 , " minutes")
-    if batch_loss < minQuestionLoss:
-        print("Turning on all losses")
-        #loss_flag = np.array([1,1,1,1])
-    if(epoch%5 == 0):
-        print("Saving model")
-        #saver.save(session, "qgen-model")
-
-
-# In[ ]:
-
-
-reduced_glove.shape[0]
-
-
-# In[ ]:
-
-
-saver = tf.train.Saver()
-saver.save(session, "qgen-model")
-
-
-# In[ ]:
-
-
-batch_input[5][0].shape
-
-
-# In[ ]:
-
-
-config = tf.ConfigProto()
-config.gpu_options.allow_growth = True
-session = tf.Session(config=config)
-saver = tf.train.Saver()
-
-saver.restore(session, 'qgen-model')
-
-
-# In[ ]:
-
-
-answers = session.run(answer_tags, {
-    d_tokens: batch_input[0][0],
-    d_lengths: batch_input[1][0],
-})
-print(answers.shape)
-print(answers[0])
-answers = np.argmax(answers, 2)
-print(answers.shape)
-print(answers[0])
-
-
-# In[ ]:
-
-
-for i in range(276):
-    print("Prediction")
-    printAllAns(answers,2,0)
-    print("Ground Truth")
-    printAllAns(batch_input[2][2],2,0)
-
-
-# In[ ]:
-
-
-def printDoc(batch,num):
-    for i in batch_input[0][batch][num]:
-        print(look_up_token_reduced(i),sep=" ", end=" ")
-    print(" ")
-
-def printQues(batch,num):
-    for i in batch_input[5][batch][num]:
-        print(look_up_token_reduced(i),sep=" ", end=" ")
-    print(" ")
-    
-def printAnsForQuestion(batch, num):
-    for i in batch_input[5][batch][num]:
-        print(look_up_token_reduced(i),sep=" ", end=" ")
-    print(" ")
-    
-def printAllAns(answers, batch, num):
-    for i,word in enumerate(batch_input[0][batch][num]):
-        if answers[num][i] == 1 :
-            print(look_up_token_reduced(word),sep=" ", end=" ")
-    print(" ")
-    
-
-
-# In[ ]:
-
-
-import itertools
-
-batchNum = 0
-
-helper = seq2seq.GreedyEmbeddingHelper(embedding, tf.fill([batch_input[0][batchNum].shape[0]], START_TOKEN), END_TOKEN)
-decoder = seq2seq.BasicDecoder(decoder_cell, helper, encoder_state, output_layer=projection)
-decoder_outputs, _, _ = seq2seq.dynamic_decode(decoder, maximum_iterations=max_question_len)
-decoder_outputs = decoder_outputs.rnn_output
-
-
-questions = session.run(decoder_outputs, {
-    d_tokens: batch_input[0][batchNum],
-    d_lengths: batch_input[1][batchNum],
-    a_labels: batch_input[2][batchNum],
-    encoder_input_mask: batch_input[3][batchNum],
-    encoder_lengths: batch_input[4][batchNum],
-    e_context: batch_input[9][batchNum],
-})
-
-
-
-# In[ ]:
-
-
-batch_input[9][batchNum].shape
-
-
-# In[ ]:
-
-
-#questions[:,:,END_TOKEN] = 0
-qs = np.argmax(questions, 2)
-
-
-# In[ ]:
-
-
-def sigmoid(x):
-    return 1.0 / (1.0 + np.exp(-x))
-
-
-# In[ ]:
-
-
-
-for i in np.argsort(questions[0][0])[-100:]:
-    print(sigmoid(questions[0][0][i]))
-    
-
-
-# In[ ]:
-
-
-for i in np.argsort(questions[0][10])[-100:]:
-    print(sigmoid(questions[0][10][i]),look_up_token_reduced(i), sep=" ", end= " ")
-print("")
-print(X_train_comp[0])
-
-
-# In[ ]:
-
-
-p1 = 0
-p2 = 0
-
-for i in np.where(batch_input[9][0][0][0] == 1)[0]:
-    p1 += -np.log(sigmoid(questions[0][0][i]) + 10e-7)
-    
-for i in np.where(batch_input[9][0][0][0] == 0)[0]:
-    p2 += -np.log(sigmoid(questions[0][0][i]) + 10e-7)
-
-print(p1)
-print(p2)
-print(p2-p1)
-
-
-# In[ ]:
-
-
-for i in range(batch_input[0][batchNum].shape[0]):
-    print("---------------------------------------------------------------------------------------------")
-    question = itertools.takewhile(lambda t: t != END_TOKEN, qs[i])
-    print("Generated Question: " + " ".join(look_up_token_reduced(token) for token in question))
-    print("Ground Truth Question: ")
-    printQues(batchNum,i)
-    print("Ground Truth Answer: ", X_train_ans_shuffled[batch_size*batchNum + i])
-    print("Context:")
-    printDoc(batchNum,i)
-    print("---------------------------------------------------------------------------------------------")
-    
-    
-
-
-# In[ ]:
-
-
-batch_input[5][18].shape
-
-
-# In[ ]:
-
-
-questions[:,0:14,:].shape
-
-
-# In[ ]:
-
-
-a1 = tf.constant(batch_input[9][0], dtype=tf.float32)
-a2 = tf.constant(questions[:,0:14,:], dtype=tf.float32)
-l1 = tf.reduce_sum(-tf.log(tf.multiply(tf.sigmoid(a2),a1) + 10e-7)) #y = 1
-l2 = tf.reduce_sum(-tf.log(tf.multiply(tf.sigmoid(1-a2),(1 - a1)) + 10e-7)) #y= 0
-sess = tf.Session()
-with sess.as_default():
-    print(l1.eval() + l2.eval())
-
-
-
-
-# In[ ]:
-
-
-questions.shape
-
-
-# In[ ]:
-
-
-batch_input[9][0][0:1].shape
-
-
-# In[ ]:
-
-
-for i in batch_input[0][0][0]:
-    print(look_up_token_reduced(i), sep = " ", end=" ")
 
 
