@@ -232,7 +232,8 @@ print(Y_train_ques_all_shuffled[101])
 # In[25]:
 
 
-examples_to_take_train = len(X_train_comp_all_shuffled)
+#examples_to_take_train = len(X_train_comp_all_shuffled)
+examples_to_take_train = 40000
 
 X_train_comp = X_train_comp_all_shuffled[0:examples_to_take_train]
 X_train_comp_ans = X_train_comp_ans_all_shuffled[0:examples_to_take_train]
@@ -544,6 +545,7 @@ class AnswerEncoderRNN(nn.Module):
         output, hidden = self.gru(x, hidden)
         final_output = self.fc(output)
         final_output = F.sigmoid(final_output)
+        self.hiddenState = hidden
         return final_output, output, hidden
     
     def initHidden(self):
@@ -565,6 +567,7 @@ class QuestionEncoderRNN(nn.Module):
     
     def forward(self, x, hidden):
         output, hidden = self.gru(x, hidden)
+        self.hiddenState = hidden
         return output, hidden
     
     def initHidden(self):
@@ -586,6 +589,7 @@ class QuestionDecoderRNN(nn.Module):
         
     def forward(self, x, hidden):
         output, hidden = self.gru(x, hidden)
+        self.hiddenState = hidden
         return output, hidden
     
     def initHidden(self):
@@ -650,6 +654,12 @@ def save():
 
 # In[204]:
 
+def repackage_hidden(h):
+    """Wraps hidden states in new Variables, to detach them from their history."""
+    if type(h) == Variable:
+        return Variable(h.data)
+    else:
+        return tuple(repackage_hidden(v) for v in h)
 
 verboseBatchPrinting = True
 averageBatchLossPrinting = True
@@ -680,8 +690,7 @@ for epoch in range(1, num_epochs+1):
 
         optimizer.zero_grad()
         embedded_inp = embedder(inp).cuda()
-        print("Embedded input : ", embedded_inp.size())
-        print("Answer encoder Hidden : ", answer_encoder_hidden.size())
+        answer_encoder_hidden = repackage_hidden(answer_encoder_hidden)
         answer_tags, answer_outputs, answer_encoder_hidden = answerEncoder(embedded_inp, answer_encoder_hidden)
         
         
@@ -696,7 +705,7 @@ for epoch in range(1, num_epochs+1):
         outputs = torch.mul(answer_tags.squeeze(-1),t_document_mask)
         
         
-        answer_loss = criterion1(outputs, labels.unsqueeze(2).float())
+        answer_loss = criterion1(outputs, labels.float())
             
         
         t_answer_mask = Variable(torch.from_numpy(batch_input[3][batch_num])).float()
@@ -708,13 +717,15 @@ for epoch in range(1, num_epochs+1):
         if use_cuda:
             question_encoder_hidden_batch = question_encoder_hidden_batch.cuda()
         
-        
+        question_encoder_hidden = repackage_hidden(question_encoder_hidden)
         for i in range(current_batch_size):
             _ , question_encoder_hidden = questionEncoder(question_encoder_input[i:i+1,0:batch_input[4][batch_num][i],:], question_encoder_hidden)
             question_encoder_hidden_batch[:,i:i+1,:] = question_encoder_hidden
             
         #question_encoder_hidden_batch = fcLayer(question_encoder_hidden_batch)
             
+        if type(question_decoder_hidden) == Variable:
+            question_decoder_hidden = repackage_hidden(question_decoder_hidden)
         question_loss = 0
         for i in range(current_batch_size):
             question_decoder_hidden = question_encoder_hidden_batch[:,i:i+1,:].clone()
@@ -755,10 +766,5 @@ for epoch in range(1, num_epochs+1):
         print('Average Loss after Epoch %d : %.4f'
                    %(epoch, avg_loss/number_of_batches))
 
-    if epoch % 2:
+    if epoch % 2==0:
         save()
-
-
-
-
-
