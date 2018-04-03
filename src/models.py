@@ -86,7 +86,6 @@ def _cat_directions(self, hidden):
 
     if isinstance(hidden, tuple):
         # LSTM hidden contains a tuple (hidden state, cell state)
-        print(tuple([h.shape for h in hidden]))
         hidden = tuple([_cat(h) for h in hidden])
     else:
         # GRU hidden
@@ -101,7 +100,6 @@ class DocumentEncoder(BaseRNN):
         self.fc = nn.Linear(self.output_size, 1)
 
     def forward(self,x ,h):
-        print(x.shape, h.shape)
         if self.rnn_type == 'LSTM':
             o, h = self.rnn(x, (h[0],h[1]))
         else:
