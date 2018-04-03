@@ -235,8 +235,6 @@ def train_epoch(train_data, epoch):
 
     print('Average Loss after Epoch %d : %.4f' %(epoch+1, avg_loss/num_batches))
     print("Epoch time: {:.2f}s".format(time.time() - epoch_begin_time))
-    return q_loss
-
 
 
 
@@ -330,7 +328,6 @@ def evaluate(data, generate=False):
             # storing for printing later
             if generate:
                 q_gen['gt'][i,:,q_len] = np.array([look_up_token(j) for j in q_in_tf[:,q_len]])
-                return q_in_gen
                 q_gen['full_gen'][i,:,q_len] = np.array([look_up_token(j) for j in q_in_gen.squeeze().data])
 
                 _, q_out_tf = q_decoder_out_tf.max(2)
