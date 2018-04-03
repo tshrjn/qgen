@@ -38,7 +38,7 @@ parser.add_argument('--save_data', default='', type=str,
 parser.add_argument('--reduced_glove', action='store_true', default=False,
                     help='whether to use reduced_glove')
 parser.add_argument('--example_to_train', type=int, default=1000,
-                    help='example taken to train')
+                    help='example taken to train (use 0 for full)')
 parser.add_argument('--split_ratio', type=float, default=0.8,
                     help='ratio of training data')
 
@@ -128,7 +128,8 @@ def train_epoch(train_data, epoch):
     q_encoder.train()
     q_decoder.train()
 
-    print("No. of batches in training data: {}, with batch_size: {} ".format(len(train_data), len(train_data[0]['document_tokens'])))
+    if epoch == 0:
+        print("No. of batches in training data: {}, with batch_size: {} ".format(len(train_data), len(train_data[0]['document_tokens'])))
     epoch_begin_time = time.time()
     avg_loss= 0
 
@@ -230,11 +231,12 @@ def train_epoch(train_data, epoch):
         avg_loss+= loss.data[0]
 
         print ('Batch: %d \t Epoch : %d\tNet Loss: %.4f \tAnswer Loss: %.4f \tQuestion Loss: %.4f'
-               %(i, epoch, loss.data[0], a_loss.data[0], q_loss.data[0]))
+               %(i, epoch+1, loss.data[0], a_loss.data[0], q_loss.data[0]))
 
-    print('Average Loss after Epoch %d : %.4f' %(epoch, avg_loss/num_batches))
+    print('Average Loss after Epoch %d : %.4f' %(epoch+1, avg_loss/num_batches))
     print("Epoch time: {:.2f}s".format(time.time() - epoch_begin_time))
     return q_loss
+
 
 
 
@@ -260,8 +262,10 @@ def evaluate(data, generate=False):
             continue
 
         # make hidden zero for doc encoder
-        dim1 = 2 if doc_encoder.bidirectional else 1
-        doc_encoder_h = Variable(torch.zeros(dim1, batch_size, doc_encoder.hidden_size))
+        if args.rnn_type == 'GRU':
+            doc_encoder_h = Variable(torch.zeros(doc_encoder.num_directions * doc_encoder.num_layers, batch_size, doc_encoder.hidden_size))
+        elif args.rnn_type == 'LSTM':
+            doc_encoder_h = Variable(torch.zeros(2, doc_encoder.num_directions * doc_encoder.num_layers, batch_size, doc_encoder.hidden_size))
 
         # Supervised Learning of "part of Answer" prediction
         doc_token = Variable(torch.from_numpy(batch['document_tokens']))
@@ -296,10 +300,16 @@ def evaluate(data, generate=False):
         q_embedded_in_gen = embedder(q_in_gen_tensor).unsqueeze(1)
 
         # Pass encoder hidden
-        q_decoder_h = doc_encoder_h.view(1, batch_size, -1)
-        # 2 hidden vectors for teacher forcing and fully generated
-        q_decoder_h_tf = q_decoder_h.clone()
-        q_decoder_h_gen = q_decoder_h.clone()
+        if args.rnn_type == 'GRU':
+            q_decoder_h = doc_encoder_h.view(q_decoder.num_directions * q_decoder.num_layers, batch_size, -1)
+            q_decoder_h_tf = q_decoder_h.clone()
+            q_decoder_h_gen = q_decoder_h.clone()
+
+        elif args.rnn_type == 'LSTM':
+            q_decoder_h = (doc_encoder_h[0].view(1, batch_size, -1), doc_encoder_h[1].view(1, batch_size, -1))
+            # 2 hidden vectors for teacher forcing and fully generated
+            q_decoder_h_tf = tuple(x.clone() for x in q_decoder_h)
+            q_decoder_h_gen = tuple(x.clone() for x in q_decoder_h)
 
         # Set q_loss = 0 for batch
         q_loss_tf = 0
@@ -307,15 +317,10 @@ def evaluate(data, generate=False):
         for q_len in range(max_q_len):
             # teacher forcing
             q_decoder_out_tf, q_decoder_h_tf =  q_decoder(q_embedded_in_tf[:,q_len:q_len+1,:], q_decoder_h_tf)
+
             # full gen:
             q_decoder_out_gen, q_decoder_h_gen =  q_decoder(q_embedded_in_gen, q_decoder_h_gen)
-            if args.gpu:
-                q_out = np.argmax(q_decoder_out_gen.squeeze().cpu().data.numpy(), axis=1)
-            else:
-                q_out = np.argmax(q_decoder_out_gen.squeeze().data.numpy(), axis=1)
-            q_in_gen = torch.from_numpy(q_out).long()
-            if args.gpu:
-                q_in_gen = q_in_gen.cuda()
+            _, q_in_gen = q_decoder_out_gen.max(2)
             q_embedded_in_gen = embedder(q_in_gen).unsqueeze(1)
 
             # losses
@@ -325,14 +330,11 @@ def evaluate(data, generate=False):
             # storing for printing later
             if generate:
                 q_gen['gt'][i,:,q_len] = np.array([look_up_token(j) for j in q_in_tf[:,q_len]])
-                q_gen['full_gen'][i,:,q_len] = np.array([look_up_token(j) for j in q_out])
+                return q_in_gen
+                q_gen['full_gen'][i,:,q_len] = np.array([look_up_token(j) for j in q_in_gen.squeeze().data])
 
-                if args.gpu:
-                    q_out = np.argmax(q_decoder_out_tf.squeeze().cpu().data.numpy(), axis=1)
-                else:
-                    q_out = np.argmax(q_decoder_out_tf.squeeze().data.numpy(), axis=1)
-
-                q_gen['tf_gen'][i,:,q_len] = np.array([look_up_token(j) for j in q_out])
+                _, q_out_tf = q_decoder_out_tf.max(2)
+                q_gen['tf_gen'][i,:,q_len] = np.array([look_up_token(j) for j in q_out_tf.squeeze().data])
 
 
         print ('Batch: %d\tQuestion Loss (teacher forcing): %.4f\tQuestion Loss (full generated): %.4f'
@@ -345,6 +347,7 @@ def evaluate(data, generate=False):
     print("Eval time: {:.2f}s".format(time.time() - eval_begin_time))
     if generate:
         display_generated(q_gen)
+
 
 
 def save(path):

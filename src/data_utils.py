@@ -209,7 +209,7 @@ def data_parse(args):
     # In[13]:
 
 
-    examples_to_take_train = args.example_to_train
+    examples_to_take_train = args.example_to_train if args.example_to_train !=0 else len(X_train_comp_all_shuffled)
 
     X_train_comp = X_train_comp_all_shuffled[0:examples_to_take_train]
     X_train_ans = X_train_ans_all_shuffled[0:examples_to_take_train]
