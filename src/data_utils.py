@@ -77,7 +77,7 @@ def data_parse(args):
         if(right > len(passage)):
             right = len(passage)
         return passage[left:right]
-        
+
     def findAnsVec(answer,passage):
         ans = np.zeros((len(passage)))
         start,end = find_sub_list(answer,passage)
@@ -99,7 +99,7 @@ def data_parse(args):
     invalid = 0
     for i,context in enumerate(contexts):
         passage = word_tokenize(context.lower())
-        
+
         a_lab = np.zeros(len(passage))
         for j,_ in enumerate(qas[i]):
             answer = word_tokenize(qas[i][j]["answers"][0]['text'].lower())
@@ -108,8 +108,8 @@ def data_parse(args):
                 invalid=invalid+1
                 continue
             a_lab[start:end] = 1
-            
-                  
+
+
         for j,_ in enumerate(qas[i]):
             try:
                 question = word_tokenize(qas[i][j]['question'].lower())
@@ -120,12 +120,12 @@ def data_parse(args):
                     continue
                 marked_comp = np.zeros(len(passage))
                 marked_comp[start:end] = 1
-                
+
                 if CapPassage:
                     cappedPassage = capPassage(passage,answer)
                 else:
                     cappedPassage = passage
-                
+
                 X_train_comp_all.append(cappedPassage)
                 X_train_comp_with_answer_marked_all.append(marked_comp)
                 X_train_ans_all.append(answer)
@@ -184,7 +184,7 @@ def data_parse(args):
             reduced_glove.append(glove[l])
             if(args.words_to_take!=0 and len(reduced_glove) == args.words_to_take):
                 break
-            
+
     def look_up_word_reduced(word):
         return _word_to_idx_reduced.get(word, UNKNOWN_TOKEN)
 
@@ -196,7 +196,7 @@ def data_parse(args):
     reduced_glove.shape
 
 
-    print("No. of invalid words:", invalid)
+    print("No. of invalid words/examples:", invalid)
 
     # In[12]:
 
@@ -255,7 +255,7 @@ def data_parse(args):
         document_lengths[i] = len(X_train_comp[i])
 
         answer_lengths[i] = len(X_train_ans[i])
-        
+
         question_input_words = ([START_WORD] + Y_train_ques[i])
         question_output_words = (Y_train_ques[i] + [END_WORD])
 
@@ -263,7 +263,7 @@ def data_parse(args):
                 question_input_tokens[i, j] = look_up_word_reduced(word)
         for j, word in enumerate(question_output_words):
             question_output_tokens[i, j] = look_up_word_reduced(word)
-        question_lengths[i] = len(question_input_words)    
+        question_lengths[i] = len(question_input_words)
 
 
     def create_vocabulary(data):
@@ -307,17 +307,17 @@ def data_parse(args):
         return one_hot_data
 
     def context_to_indices_glove(X,max_len):
-        
-        m = len(X)                                 
-        
+
+        m = len(X)
+
         X_indices = np.full([m,max_len],look_up_word_reduced(END_WORD))
-        
+
         for i in range(m):
             j = 0
             for w in X[i]:
                 if(j>=max_len):
                     break;
-                
+
                 X_indices[i, j] = look_up_word_reduced(w)
                 j = j+1
         return X_indices
@@ -328,12 +328,12 @@ def data_parse(args):
 
     def createBatch(inputs,batch_size,shuffle=False):
         outputs = []
-        
+
         num_batches = len(inputs[0]) // batch_size + 1
 
         for i in range(num_batches-1):
             start = 0
-            
+
             output = {'document_tokens':[],
                         'document_lengths':[],
                         'answer_labels_all':[],
@@ -342,13 +342,13 @@ def data_parse(args):
                         'question_input_tokens':[],
                         'question_output_tokens':[],
                         'question_lengths':[]}
-            
+
             for index,inp in enumerate(inputs):
                 #maxD = max(inputs[1][start:start+batch_size])
                 maxD = max_document_len
                 maxA = max(inputs[4][start:start+batch_size])
                 maxQ = max_question_len
-                
+
                 if index == 0:
                     output['document_tokens'].append(inp[start:start+batch_size,0:maxD])
                 elif index==1:
@@ -365,7 +365,7 @@ def data_parse(args):
                     output['question_output_tokens'].append(inp[start:start+batch_size, 0:maxQ])
                 elif index==7:
                     output['question_lengths'].append(inp[start:start+batch_size])
-            
+
             output["document_tokens"] = np.array(output["document_tokens"])
             output["document_lengths"] = np.array(output["document_lengths"])
             output["answer_labels_all"] = np.array(output["answer_labels_all"])
@@ -376,7 +376,7 @@ def data_parse(args):
             output["question_lengths"] = np.array(output["question_lengths"])
             outputs.append(output)
             start = start + batch_size
-            
+
         # Remaining training sample i.e. training mod batch_size
         #maxD = max(inputs[1][start:])
         maxD = max_document_len
@@ -417,7 +417,7 @@ def data_parse(args):
         output["question_lengths"] = np.array(output["question_lengths"])
 
         outputs.append(output)
-        
+
         return outputs
 
 
@@ -504,10 +504,10 @@ def squad_parser(contexts, qas, examples_to_take_train=None, CapPassage=False):
     invalid = 0
     X_train_ans_label_all = []
 
-    # 
+    #
     for i,context in enumerate(contexts):
         passage = word_tokenize(context.lower())
-        
+
         a_lab = np.zeros(len(passage))
         for j,_ in enumerate(qas[i]):
             answer = word_tokenize(qas[i][j]["answers"][0]['text'].lower())
@@ -515,26 +515,26 @@ def squad_parser(contexts, qas, examples_to_take_train=None, CapPassage=False):
             if start == -1:
                 continue
             a_lab[start:end+1] = 1
-                
-                
+
+
         for j,_ in enumerate(qas[i]):
             try:
                 question = word_tokenize(qas[i][j]['question'].lower())
                 answer = word_tokenize(qas[i][j]["answers"][0]['text'].lower())
-                
+
                 if CapPassage:
                     cappedPassage = capPassage(passage,answer)
                 else:
                     cappedPassage = passage
-                
+
                 X_train_comp_ans_all.append(findAnsVec(answer,passage))
                 X_train_ans_label_all.append(a_lab)
                 X_train_comp_all.append(cappedPassage)
                 X_train_ans_all.append(answer)
                 Y_train_ques_all.append(question)
             except Exception as e:
-                # TODO: using a better tokenizer - 1500 q-ans pairs affected 
-                print("Exception: ",e) 
+                # TODO: using a better tokenizer - 1500 q-ans pairs affected
+                print("Exception: ",e)
                 invalid = invalid+1
 
     print("No. of Invalid:", invalid)
@@ -562,7 +562,7 @@ def builder(X_train_comp, X_train_comp_ans, X_train_ans, X_train_ans_label,Y_tra
     max_answer_len = len(max(X_train_ans,key=len))
     max_question_len = len(max(Y_train_ques,key=len)) + 1
 
-    # initialise all 
+    # initialise all
     document_tokens = np.zeros((examples_to_take_train, max_document_len), dtype=np.int32)
     document_lengths = np.zeros(examples_to_take_train, dtype=np.int32)
     answer_labels = np.zeros((examples_to_take_train, max_document_len), dtype=np.int32)
@@ -589,7 +589,7 @@ def builder(X_train_comp, X_train_comp_ans, X_train_ans, X_train_ans_label,Y_tra
         for j, index in enumerate(answer_indices[i]):
             answer_masks[i, j, index] = 1
         answer_lengths[i] = len(answer_indices[i])
-        
+
         #print(Y_train_ques[i])
         question_input_words = ([START_WORD] + Y_train_ques[i])
         question_output_words = (Y_train_ques[i] + [END_WORD])
@@ -599,16 +599,16 @@ def builder(X_train_comp, X_train_comp_ans, X_train_ans, X_train_ans_label,Y_tra
         for j, word in enumerate(question_output_words):
             question_output_tokens[i, j] = look_up_word(word)
         question_lengths[i] = len(question_input_words)
-        
+
         for j, word in enumerate(X_train_ans[i]):
             if(word not in Y_train_ques[i]):
                 suppression_answer[i, look_up_word(word),:] = 1
-                
+
         words_to_consider_expression = set(X_train_comp[i] + nltkStopWords + punctuations)
 
         for j,word in enumerate(words_to_consider_expression):
             expression_contexts[i,:,look_up_word(word)] = 1
-            
+
         for j,word in enumerate(words_to_consider_expression):
             expression_probabilities[i,:,look_up_word(word)] = len(np.where(expression_contexts[i][0] == 1)[0]) / float(words_to_take)
         expression_probabilities[i,:,np.where(expression_probabilities[i][0] == 0)[0]] = len(np.where(expression_contexts[i][0] == 0)[0]) / float(words_to_take)
@@ -655,17 +655,17 @@ def create_one_hot_training_Set(data,maxLen,vocabulary):
 
 
 def sentences_to_indices_glove(X,max_len):
-    
-    m = len(X)                                 
-    
+
+    m = len(X)
+
     X_indices = np.full([m,max_len],look_up_word(END_WORD))
-    
+
     for i in range(m):
         j = 0
         for w in X[i]:
             if(j>=max_len):
                 break;
-            
+
             X_indices[i, j] = look_up_word(w)
             j = j+1
     return X_indices
@@ -676,7 +676,7 @@ def create_batch(inputs,batch_size,shuffle=False):
     outputs = []
 
     for index,inp in enumerate(inputs):
-    
+
         output = {'document_tokens':[],
                     'document_lengths':[],
                     'answer_labels':[],
@@ -688,7 +688,7 @@ def create_batch(inputs,batch_size,shuffle=False):
                     'suppression_answer':[],
                     'expression_contexts': [],
                     'expression_probabilities':[]}
-    
+
         start = 0
         for i in range(num_batches):
             if i == num_batches - 1:
@@ -719,16 +719,16 @@ def create_batch(inputs,batch_size,shuffle=False):
                 output['suppression_answer'] = inp[start:end]
             elif index==9:
                 output['expression_contexts'] = inp[start:end,0:maxQ,:]
-            elif index==10: 
+            elif index==10:
                 output['expression_probabilities'] = inp[start:end,0:maxQ,:]
             start = start + batch_size
 
             # output['doc_mask'] = np.full((batch_size, max_document_len))
             # for j, m in enumerate(output['doc_mask']):
-            #     output['doc_mask'][i, output['document_lengths']:] = 
+            #     output['doc_mask'][i, output['document_lengths']:] =
 
         outputs.append(output)
-    
+
     return outputs, num_batches
 
 # def create_complete_dict(inputs,shuffle=False):
@@ -754,7 +754,7 @@ def create_batch(inputs,batch_size,shuffle=False):
 #             output['suppression_answer'] = inp
 #         elif index==9:
 #             output['expression_contexts'] = inp
-#         elif index==10: 
+#         elif index==10:
 #             output['expression_probabilities'] = inp
 
 
@@ -778,7 +778,7 @@ def get_reduced_glove(reduce_glove):
         reduced_glove.append(np.zeros(dimensions))
         reduced_glove.append(-np.ones(dimensions))
         reduced_glove.append(np.ones(dimensions))
-        
+
         words = findKMostFrequentWords(100000)
 
         print("WORDS:", len(words))
@@ -790,7 +790,7 @@ def get_reduced_glove(reduce_glove):
                 reduced_glove.append(glove[l])
                 if(len(reduced_glove) == wordToTake):
                     break
-   
+
         reduced_glove = np.array(reduced_glove)
 
         look_up_word = look_up_word_reduced
