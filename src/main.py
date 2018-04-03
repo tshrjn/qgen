@@ -115,7 +115,7 @@ if args.gpu:
 train_params = [ *list(doc_encoder.parameters()), *list(q_encoder.parameters()), *list(q_decoder.parameters()) ]
 optimizer = torch.optim.Adam(train_params, lr=args.lr)
 a_criterion = nn.BCELoss()
-q_criterion = MaskedNLLLoss() if args.unmasked else nn.NLLLoss()
+q_criterion =  nn.NLLLoss() if args.unmasked else MaskedNLLLoss()
 
 def train_epoch(train_data, epoch):
     doc_encoder.train()
