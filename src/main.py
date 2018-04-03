@@ -16,7 +16,6 @@ from models import *
 from data_utils import *
 from utils import *
 
-
 parser = argparse.ArgumentParser(description='PyTorch QGen')
 parser.add_argument('--num_epochs', default=100, type=int,
                     help='number of training epochs')
@@ -60,6 +59,8 @@ parser.add_argument('--no_eval', action='store_true', default=False,
                     help="don't evaluate")
 parser.add_argument('--gen', action='store_true', default=False,
                     help="Generate Questions")
+parser.add_argument('--attention', action='store_true', default=False,
+                    help="Use Attention Decoder")
 
 args = parser.parse_args()
 print(args)
@@ -67,6 +68,7 @@ print(args)
 np.random.seed(args.seed)
 torch.manual_seed(args.seed)
 args.gpu = args.gpu and torch.cuda.is_available()
+
 
 _word_to_idx = {}
 _idx_to_word = []
@@ -88,6 +90,7 @@ def look_up_word(word):
 def look_up_token(token):
     return _idx_to_word[token]
 
+max_doc_len = batches[0]['document_tokens'].shape[1]
 
 # Input: word token -> embedding
 embedder = WordEmbedder(glove)
@@ -98,15 +101,18 @@ q_encoder = BaseRNN(doc_encoder.output_size, 2*args.hidden_size)
 # Most experimentation would be in input to DECODER
 # doubly_encoded_doc_h + (context vec + encoder hidden), q_embedding -> qgen_dec_pred, qgen_dec_h
 q_decoder = QuestionDecoder(embedder.output_size, 2*args.hidden_size, embedder.input_size)
+#attention
+attention = Attention(args.hidden_size,max_doc_len)
 
 if args.gpu:
     embedder.cuda()
     doc_encoder.cuda()
     q_encoder.cuda()
     q_decoder.cuda()
+    attention.cuda()
 
 
-train_params = [ *list(doc_encoder.parameters()), *list(q_encoder.parameters()), *list(q_decoder.parameters()) ]
+train_params = [ *list(doc_encoder.parameters()), *list(q_encoder.parameters()), *list(q_decoder.parameters()), *list(attention.parameters())]
 optimizer = torch.optim.Adam(train_params, lr=args.lr)
 a_criterion = nn.BCELoss()
 q_criterion = nn.NLLLoss()
@@ -115,6 +121,7 @@ def train_epoch(train_data, epoch):
     doc_encoder.train()
     q_encoder.train()
     q_decoder.train()
+    attention.train()
 
     print("No. of batches in training data: {}, with batch_size: {} ".format(len(train_data), len(train_data[0]['document_tokens'])))
     epoch_begin_time = time.time()
@@ -181,11 +188,19 @@ def train_epoch(train_data, epoch):
 
         if use_teacher_forcing:
             for q_len in range(q_embedded_in_tf.shape[1]):
-                q_decoder_out, q_decoder_h =  q_decoder(q_embedded_in_tf[:,q_len:q_len+1,:], q_decoder_h)
+                if not args.attention:
+                    q_decoder_out, q_decoder_h =  q_decoder(q_embedded_in_tf[:,q_len:q_len+1,:], q_decoder_h)
+                else:
+                    q_decoder_h, attention_weights = attention(q_embedded_in_tf[:,q_len:q_len+1,:].squeeze(1), q_decoder_h.squeeze(0), doc_encoded)
+                    q_decoder_out, attention_hidden =  q_decoder(q_embedded_in_tf[:,q_len:q_len+1,:], q_decoder_h.unsqueeze(0))
                 q_loss += q_criterion(q_decoder_out.squeeze(), q_target[:,q_len:q_len+1].squeeze())
         else:
             for q_len in range(q_embedded_in.shape[1]):
-                q_decoder_out, q_decoder_h =  q_decoder(q_embedded_in, q_decoder_h)
+                if not args.attention:
+                     q_decoder_out, q_decoder_h =  q_decoder(q_embedded_in, q_decoder_h)
+                else:
+                    q_decoder_h, attention_weights = attention(q_embedded_in.squeeze(1), q_decoder_h.squeeze(0), doc_encoded)
+                    q_decoder_out, attention_hidden =  q_decoder(q_embedded_in, q_decoder_h.unsqueeze(0))
                 q_loss += q_criterion(q_decoder_out.squeeze(), q_target[:,q_len:q_len+1].squeeze())
                 _, q_in = q_decoder_out.max(2)
                 q_embedded_in = embedder(q_in)
@@ -210,6 +225,7 @@ def evaluate(data, generate=False):
     doc_encoder.eval()
     q_encoder.eval()
     q_decoder.eval()
+    attention.eval()
 
     if generate:
         max_q_len = data[0]["question_input_tokens"].shape[1]
@@ -273,9 +289,17 @@ def evaluate(data, generate=False):
         q_loss_gen = 0
         for q_len in range(q_embedded_in_tf.shape[1]):
             # teacher forcing
-            q_decoder_out_tf, q_decoder_h_tf =  q_decoder(q_embedded_in_tf[:,q_len:q_len+1,:], q_decoder_h_tf)
+            if not args.attention:
+                q_decoder_out_tf, q_decoder_h_tf =  q_decoder(q_embedded_in_tf[:,q_len:q_len+1,:], q_decoder_h_tf)
+            else:
+                q_decoder_h_tf, attention_weights = attention(q_embedded_in_tf[:,q_len:q_len+1,:].squeeze(1), q_decoder_h.squeeze(0), doc_encoded)
+                q_decoder_out_tf, attention_hidden =  q_decoder(q_embedded_in_tf[:,q_len:q_len+1,:], q_decoder_h_tf.unsqueeze(0))
             # full gen:
-            q_decoder_out_gen, q_decoder_h_gen =  q_decoder(q_embedded_in_gen, q_decoder_h_gen)
+            if not args.attention:
+                q_decoder_out_gen, q_decoder_h_gen =  q_decoder(q_embedded_in_gen, q_decoder_h_gen)
+            else:
+                q_decoder_h_gen, attention_weights = attention(q_embedded_in_gen.squeeze(1), q_decoder_h_gen.squeeze(0), doc_encoded)
+                q_decoder_out_gen, attention_hidden =  q_decoder(q_embedded_in_gen, q_decoder_h_gen.unsqueeze(0))
             if args.gpu:
                 q_out = np.argmax(q_decoder_out_gen.squeeze().cpu().data.numpy(), axis=1)
             else:
@@ -344,7 +368,7 @@ if not args.no_train:
         train_epoch(batches[:split], ep)
         # Eval after each epoch from randomly chosen batch of val set
         b = [np.random.choice(batches[split:-1])]
-        evaluate(b, generate=False)
+        evaluate(b, generate=args.gen)
 
 if args.save != '':
     save(args.save)
