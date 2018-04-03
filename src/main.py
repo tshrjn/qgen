@@ -62,7 +62,10 @@ parser.add_argument('--gen', action='store_true', default=False,
                     help="Print Generated Questions")
 parser.add_argument('--word_tf', action='store_true', default=False,
                     help="whether to use word or sentence based teacher forcing")
-
+parser.add_argument('--use_masked_loss', action='store_true', default=False,
+                    help="whether to use masked_ce_loss or not")
+parser.add_argument('--use_attention', action='store_true', default=False,
+                    help="whether to use attention or not")
 
 args = parser.parse_args()
 print(args)
@@ -102,18 +105,51 @@ q_encoder = BaseRNN(doc_encoder.output_size, 2*args.hidden_size)
 # Most experimentation would be in input to DECODER
 # doubly_encoded_doc_h + (context vec + encoder hidden), q_embedding -> qgen_dec_pred, qgen_dec_h
 q_decoder = QuestionDecoder(embedder.output_size, 2*args.hidden_size, embedder.input_size)
+#attention
+attention = Attention(args.hidden_size,max_doc_len)
+
+
 
 if args.gpu:
     embedder.cuda()
     doc_encoder.cuda()
     q_encoder.cuda()
     q_decoder.cuda()
+    attention.cuda()
 
-
-train_params = [ *list(doc_encoder.parameters()), *list(q_encoder.parameters()), *list(q_decoder.parameters()) ]
+train_params = [ *list(doc_encoder.parameters()), *list(q_encoder.parameters()), *list(q_decoder.parameters()), *list(attention.parameters())]
 optimizer = torch.optim.Adam(train_params, lr=args.lr)
 a_criterion = nn.BCELoss()
 q_criterion = nn.NLLLoss()
+
+def sequence_mask(sequence_length, max_len):
+    if max_len is None:
+        max_len = sequence_length.data.max()
+    batch_size = args.batch_size
+    seq_range = torch.arange(0, max_len).long()
+    seq_range_expand = seq_range.unsqueeze(0).expand(batch_size, max_len)
+    seq_range_expand = Variable(seq_range_expand)
+    if args.gpu:
+        seq_range_expand = seq_range_expand.cuda()
+    seq_length_expand = (sequence_length.unsqueeze(1)
+                         .expand_as(seq_range_expand))
+    mask = seq_range_expand < seq_length_expand
+    
+    return mask
+
+def customLoss(logits, labels, questionLengths):
+    logits_flat = logits.view(-1, logits.size(-1))
+    log_probs_flat = F.log_softmax(logits_flat, dim=-1)
+    target_flat = labels.view(-1, 1)
+    losses_flat = -torch.gather(log_probs_flat, dim=1, index=target_flat)
+    losses = losses_flat.view(*labels.size())
+    mask = sequence_mask(sequence_length=questionLengths, max_len=max_q_len)
+    losses = losses * mask.float()
+    loss = losses.sum() / mask.float().sum()
+    return loss
+
+
+
 
 
 def train_epoch(train_data, epoch):
@@ -182,34 +218,70 @@ def train_epoch(train_data, epoch):
         # Set q_loss = 0 for batch
         q_loss = 0
 
+        if args.use_masked_loss:
+            logits = Variable(torch.zeros(args.batch_size, max_q_len, embedder.input_size))
+            labels = Variable(torch.zeros(args.batch_size, max_q_len)).long()
+            doc_lengths_for_mask = Variable(torch.from_numpy(batch['question_lengths'])).long()
+            if args.gpu:
+                logits = logits.cuda()
+                labels = labels.cuda()
+                doc_lengths_for_mask = doc_lengths_for_mask.cuda()
+
+ 
         # Alternate between either word based or sentence based teacher forcing
         if args.word_tf:
             for q_len in range(max_q_len):
                 use_teacher_forcing = True if random.random() < args.tf_ratio else False
-                if use_teacher_forcing:
+                if use_teacher_forcing: 
                     q_embedded_in = q_embedded_in_tf[:,q_len:q_len+1,:]
-                    q_decoder_out, q_decoder_h = q_decoder(q_embedded_in, q_decoder_h)
+                    if not args.use_attention:
+                        q_decoder_out, q_decoder_h = q_decoder(q_embedded_in, q_decoder_h)
+                    else:
+                        q_decoder_h, attention_weights = attention(q_embedded_in.squeeze(1), q_decoder_h.squeeze(0), doc_encoded)
+                        q_decoder_out, attention_hidden =  q_decoder(q_embedded_in, q_decoder_h.unsqueeze(0))
                 else:
-                    q_decoder_out, q_decoder_h =  q_decoder(q_embedded_in, q_decoder_h)
+                    if args.use_attention:
+                        q_decoder_h, attention_weights = attention(q_embedded_in.squeeze(1), q_decoder_h.squeeze(0), doc_encoded)
+                        q_decoder_out, attention_hidden =  q_decoder(q_embedded_in, q_decoder_h.unsqueeze(0))
+                    else:
+                        q_decoder_out, q_decoder_h =  q_decoder(q_embedded_in, q_decoder_h)
                     _, q_in = q_decoder_out.max(2)
                     q_embedded_in = embedder(q_in)
 
-                q_loss += q_criterion(q_decoder_out.squeeze(), q_target[:,q_len:q_len+1].squeeze())
+                if args.use_masked_loss:
+                    logits[:,q_len:q_len+1,:] = q_decoder_out
+                    labels[:,q_len:q_len+1] = q_target[:,q_len:q_len+1]
+                else:
+                    q_loss += q_criterion(q_decoder_out.squeeze(), q_target[:,q_len:q_len+1].squeeze())
 
         else:
             use_teacher_forcing = True if random.random() < args.tf_ratio else False
 
-            if use_teacher_forcing:
-                for q_len in range(max_q_len):
-                    q_decoder_out, q_decoder_h =  q_decoder(q_embedded_in_tf[:,q_len:q_len+1,:], q_decoder_h)
-                    q_loss += q_criterion(q_decoder_out.squeeze(), q_target[:,q_len:q_len+1].squeeze())
-            else:
-                for q_len in range(max_q_len):
-                    q_decoder_out, q_decoder_h =  q_decoder(q_embedded_in, q_decoder_h)
-                    q_loss += q_criterion(q_decoder_out.squeeze(), q_target[:,q_len:q_len+1].squeeze())
+            for q_len in range(max_q_len):
+                if use_teacher_forcing:
+                    if not args.use_attention:
+                        q_decoder_out, q_decoder_h =  q_decoder(q_embedded_in_tf[:,q_len:q_len+1,:], q_decoder_h)
+                    else:
+                        q_decoder_h, attention_weights = attention(q_embedded_in_tf[:,q_len:q_len+1,:].squeeze(1), q_decoder_h.squeeze(0), doc_encoded)
+                        q_decoder_out, attention_hidden =  q_decoder(q_embedded_in_tf[:,q_len:q_len+1,:], q_decoder_h.unsqueeze(0)) 
+
+                else:
+                    if not args.use_attention:
+                        q_decoder_out, q_decoder_h =  q_decoder(q_embedded_in, q_decoder_h)
+                    else:
+                        q_decoder_h, attention_weights = attention(q_embedded_in.squeeze(1), q_decoder_h.squeeze(0), doc_encoded)
+                        q_decoder_out, attention_hidden =  q_decoder(q_embedded_in, q_decoder_h.unsqueeze(0))
+
                     _, q_in = q_decoder_out.max(2)
                     q_embedded_in = embedder(q_in)
-
+                if args.use_masked_loss:
+                    logits[:,q_len:q_len+1,:] = q_decoder_out
+                    labels[:,q_len:q_len+1] = q_target[:,q_len:q_len+1]
+                else:
+                    q_loss += q_criterion(q_decoder_out.squeeze(), q_target[:,q_len:q_len+1].squeeze())
+        
+        if args.use_masked_loss:
+            q_loss = customLoss(logits, labels, doc_lengths_for_mask)
         # loss = q_loss + a_loss
         loss = q_loss
         loss.backward()
@@ -291,6 +363,10 @@ def evaluate(data, generate=False):
         # Set q_loss = 0 for batch
         q_loss_tf = 0
         q_loss_gen = 0
+        q_loss_tf_masked = 0
+        q_loss_gen_masked = 0
+        logits = Variable(torch.zeros(args.batch_size, max_q_len, embedder.input_size), requires_grad = False)
+        labels = Variable(torch.zeros(args.batch_size, max_q_len), requires_grad = False).long()
         for q_len in range(q_embedded_in_tf.shape[1]):
             # teacher forcing
             q_decoder_out_tf, q_decoder_h_tf =  q_decoder(q_embedded_in_tf[:,q_len:q_len+1,:], q_decoder_h_tf)
