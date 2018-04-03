@@ -115,7 +115,8 @@ class QuestionDecoder(BaseRNN):
         self.fc = nn.Linear(input_size, output_size)
 
     def forward(self, x, h):
-        o, h = self.rnn(x, h)
+        if self.rnn_type == 'LSTM':
+            o, h = self.rnn(x, (h[0],h[1]))
         x = self.fc(x)
         x = F.log_softmax(x, dim=-1)
         return x, h

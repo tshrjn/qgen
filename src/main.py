@@ -319,7 +319,7 @@ def evaluate(data, generate=False):
             # full gen:
             q_decoder_out_gen, q_decoder_h_gen =  q_decoder(q_embedded_in_gen, q_decoder_h_gen)
             _, q_in_gen = q_decoder_out_gen.max(2)
-            q_embedded_in_gen = embedder(q_in_gen).unsqueeze(1)
+            q_embedded_in_gen = embedder(q_in_gen)
 
             # losses
             q_loss_tf += q_criterion(q_decoder_out_tf.squeeze(), q_target[:,q_len:q_len+1].squeeze())
