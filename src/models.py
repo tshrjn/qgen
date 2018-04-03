@@ -69,7 +69,7 @@ class MaskedNLLLoss(nn.NLLLoss):
         _assert_no_grad(target)
         curr_loss = F.nll_loss(input, target, self.weight, self.size_average, self.ignore_index, self.reduce)
         loss_mask = target == END_TOKEN
-        loss_mask = loss_mask.float()
+        loss_mask = 1 - loss_mask.float()
         curr_loss = curr_loss * loss_mask
         curr_loss = curr_loss.sum() / len(loss_mask)
         return curr_loss
