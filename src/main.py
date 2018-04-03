@@ -131,11 +131,11 @@ def train_epoch(train_data, epoch):
         # Supervised Learning of "part of Answer" prediction
         doc_token = Variable(torch.from_numpy(batch['document_tokens']))
         answer_target = Variable(torch.from_numpy(batch['answer_labels']).float())
-        
+
         doc_embeddings = embedder(doc_token)
         # Adding additional dim. with answer tags
         doc_ans_embedding = torch.cat((doc_embeddings,answer_target.unsqueeze(-1)),dim=-1)
-    
+
         answer_pred, doc_encoded, doc_encoder_h = doc_encoder(doc_ans_embedding, doc_encoder_h)
         a_loss = a_criterion(answer_pred.squeeze(), answer_target)
 
@@ -148,7 +148,7 @@ def train_epoch(train_data, epoch):
         # Set q_loss = 0 for batch
         q_loss = 0
         for q_len in range(q_embedded_in.shape[1]):
-            q_decoder_out, q_decoder_h =  q_decoder(q_embedded_in[:,q_len:q_len+1,:], q_decoder_h)                
+            q_decoder_out, q_decoder_h =  q_decoder(q_embedded_in[:,q_len:q_len+1,:], q_decoder_h)
             q_loss += q_criterion(q_decoder_out.squeeze(), q_target[:,q_len:q_len+1].squeeze())
 
         # loss = q_loss + a_loss
@@ -157,7 +157,7 @@ def train_epoch(train_data, epoch):
         optimizer.step()
 
         avg_loss+= loss.data[0]
-    
+
         print ('Batch: %d \t Epoch : %d\tNet Loss: %.4f \tAnswer Loss: %.4f \tQuestion Loss: %.4f'
                %(i, epoch, loss.data[0], a_loss.data[0], q_loss.data[0]))
 
@@ -165,18 +165,19 @@ def train_epoch(train_data, epoch):
     print("Epoch time: {:.2f}s".format(time.time() - epoch_begin_time))
 
 
-def evaluate(data, generated=False):
+def evaluate(data, generate=False):
+    print("Evaluating:")
     doc_encoder.eval()
     q_encoder.eval()
     q_decoder.eval()
 
     if generate:
         max_q_len = data[0]["question_input_tokens"].shape[1]
-        q_gen = {'gt':np.zeros((len(data),args.batch_size,max_q_len),dtype=object),
-                 'tf_gen':np.zeros((len(data),args.batch_size,max_q_len),dtype=object),
-                'full_gen':np.zeros((len(data),args.batch_size,max_q_len),dtype=object),
+        q_gen = {'gt':np.full((len(data),args.batch_size,max_q_len),'<END>',dtype=object),
+                 'tf_gen':np.full((len(data),args.batch_size,max_q_len),'<END>',dtype=object),
+                'full_gen':np.full((len(data),args.batch_size,max_q_len),'<END>',dtype=object),
                  }
-    
+
     eval_begin_time = time.time()
     batch_loss = 0
     for i, batch in enumerate(data):
@@ -195,7 +196,7 @@ def evaluate(data, generated=False):
         doc_embeddings = embedder(doc_token)
         # Adding additional dim. with answer tags
         doc_ans_embedding = torch.cat((doc_embeddings,answer_target.unsqueeze(-1)),dim=-1)
-        
+
         answer_pred, doc_encoded, doc_encoder_h = doc_encoder(doc_ans_embedding, doc_encoder_h)
         a_loss = a_criterion(answer_pred.squeeze(), answer_target)
 
@@ -209,40 +210,40 @@ def evaluate(data, generated=False):
 
         # Pass encoder hidden
         q_decoder_h = doc_encoder_h.view(1, batch_size, -1)
-        # 2 hidden vectors for teacher forcing and fully generated 
+        # 2 hidden vectors for teacher forcing and fully generated
         q_decoder_h_tf = q_decoder_h.clone()
         q_decoder_h_gen = q_decoder_h.clone()
-        
+
         # Set q_loss = 0 for batch
         q_loss_tf = 0
         q_loss_gen = 0
         for q_len in range(q_embedded_in_tf.shape[1]):
             # teacher forcing
-            q_decoder_out_tf, q_decoder_h_tf =  q_decoder(q_embedded_in_tf[:,q_len:q_len+1,:], q_decoder_h_tf)                
+            q_decoder_out_tf, q_decoder_h_tf =  q_decoder(q_embedded_in_tf[:,q_len:q_len+1,:], q_decoder_h_tf)
             # full gen:
-            q_decoder_out_gen, q_decoder_h_gen =  q_decoder(q_embedded_in_gen, q_decoder_h_gen)                
+            q_decoder_out_gen, q_decoder_h_gen =  q_decoder(q_embedded_in_gen, q_decoder_h_gen)
             q_out = np.argmax(q_decoder_out_gen.squeeze().data.numpy(), axis=1)
             q_in_gen = torch.from_numpy(q_out).long()
             q_embedded_in_gen = embedder(q_in_gen).unsqueeze(1)
-            
+
             # losses
             q_loss_tf += q_criterion(q_decoder_out_tf.squeeze(), q_target[:,q_len:q_len+1].squeeze())
             q_loss_gen += q_criterion(q_decoder_out_gen.squeeze(), q_target[:,q_len:q_len+1].squeeze())
-            
-            # storing for printing later
-            q_gen['gt'][i,:,q_len] = np.array([look_up_token(j) for j in q_in_tf[:,q_len]])
-            
-            q_gen['full_gen'][i,:,q_len] = np.array([look_up_token(j) for j in q_out])
 
-            q_out = np.argmax(q_decoder_out_tf.squeeze().data.numpy(), axis=1)
-            q_gen['tf_gen'][i,:,q_len] = np.array([look_up_token(j) for j in q_out])
-            
+            # storing for printing later
+            if generate:
+                q_gen['gt'][i,:,q_len] = np.array([look_up_token(j) for j in q_in_tf[:,q_len]])
+                q_gen['full_gen'][i,:,q_len] = np.array([look_up_token(j) for j in q_out])
+
+                q_out = np.argmax(q_decoder_out_tf.squeeze().data.numpy(), axis=1)
+                q_gen['tf_gen'][i,:,q_len] = np.array([look_up_token(j) for j in q_out])
+
 
         print ('Batch: %d\tQuestion Loss (teacher forcing): %.4f\tQuestion Loss (full generated): %.4f'
                    %(i, q_loss_tf.data[0], q_loss_gen.data[0]))
 
-        batch_loss+= q_loss_gen.data[0]        
-        
+        batch_loss+= q_loss_gen.data[0]
+
     print('Average loss (full gen): %.4f' %( batch_loss/len(data)))
         # TODO: Eval Gen
     print("Eval time: {:.2f}s".format(time.time() - eval_begin_time))
@@ -252,17 +253,22 @@ def evaluate(data, generated=False):
 
 def save(path):
     d = dict()
-    d['policy_net'] = policy_net.state_dict()
-    d['log'] = log
-    d['trainer'] = trainer.state_dict()
+    # d['log'] = log
+    d['doc_encoder'] = doc_encoder.state_dict()
+    d['q_encoder'] = q_encoder.state_dict()
+    d['q_decoder'] = q_decoder.state_dict()
+    d['optimizer'] = optimizer.state_dict()
     torch.save(d, path)
 
 def load(path):
     d = torch.load(path)
-    log.clear()
-    policy_net.load_state_dict(d['policy_net'])
-    log.update(d['log'])
-    trainer.load_state_dict(d['trainer'])
+    # log.clear()
+    doc_encoder.load_state_dict(d['doc_encoder'])
+    q_encoder.load_state_dict(d['q_encoder'])
+    q_decoder.load_state_dict(d['q_decoder'])
+    optimizer.load_state_dict(d['optimizer'])
+    # log.update(d['log'])
+    # trainer.load_state_dict(d['trainer'])
 
 
 if args.load != '':
@@ -275,7 +281,7 @@ if not args.no_train:
         train_epoch(batches[:split], ep)
         # Eval after each epoch from randomly chosen batch of val set
         b = [np.random.choice(batches[split:-1])]
-        evaluate(b, False)
+        evaluate(b, generate=False)
 
 if args.save != '':
     save(args.save)
