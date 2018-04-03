@@ -4,9 +4,9 @@ from torch import nn
 from torch.autograd import Variable
 
 
-class Embedder(nn.Module):
+class WordEmbedder(nn.Module):
     def __init__(self, wt_params):
-        super(Embedder, self).__init__()
+        super(WordEmbedder, self).__init__()
         self.input_size, self.output_size = wt_params.shape
         self.embedding = nn.Embedding(self.input_size, self.output_size)
         
