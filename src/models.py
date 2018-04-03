@@ -138,5 +138,5 @@ class MaskedNLLLoss(nn.NLLLoss):
         loss_mask = target == END_TOKEN
         loss_mask = 1 - loss_mask.float()
         curr_loss = curr_loss * loss_mask
-        curr_loss = curr_loss.sum() / len(loss_mask)
+        curr_loss = curr_loss.sum() / loss_mask.sum()
         return curr_loss
