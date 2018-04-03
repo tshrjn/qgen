@@ -95,6 +95,12 @@ q_encoder = BaseRNN(doc_encoder.output_size, 2*args.hidden_size)
 # doubly_encoded_doc_h + (context vec + encoder hidden), q_embedding -> qgen_dec_pred, qgen_dec_h
 q_decoder = QuestionDecoder(embedder.output_size, 2*args.hidden_size, embedder.input_size)
 
+if args.gpu:
+    embedder.cuda()
+    doc_encoder.cuda()
+    q_encoder.cuda()
+    q_decoder.cuda()
+
 
 train_params = [ *list(doc_encoder.parameters()), *list(q_encoder.parameters()), *list(q_decoder.parameters()) ]
 optimizer = torch.optim.Adam(train_params, lr=args.lr)
@@ -132,6 +138,11 @@ def train_epoch(train_data, epoch):
         doc_token = Variable(torch.from_numpy(batch['document_tokens']))
         answer_target = Variable(torch.from_numpy(batch['answer_labels']).float())
 
+        if args.gpu:
+            doc_encoder_h = doc_encoder_h.cuda()
+            doc_token = doc_token.cuda()
+            answer_target = answer_target.cuda()
+
         doc_embeddings = embedder(doc_token)
         # Adding additional dim. with answer tags
         doc_ans_embedding = torch.cat((doc_embeddings,answer_target.unsqueeze(-1)),dim=-1)
@@ -139,8 +150,12 @@ def train_epoch(train_data, epoch):
         answer_pred, doc_encoded, doc_encoder_h = doc_encoder(doc_ans_embedding, doc_encoder_h)
         a_loss = a_criterion(answer_pred.squeeze(), answer_target)
 
-        q_embedded_in = embedder(torch.from_numpy(batch["question_input_tokens"]).long())
+        q_in = torch.from_numpy(batch["question_input_tokens"]).long()
         q_target = Variable(torch.from_numpy(batch["question_output_tokens"]).long())
+        if args.gpu:
+            q_in = q_in.cuda()
+            q_target = q_target.cuda()
+        q_embedded_in = embedder(q_in)
 
         # Pass encoder hidden
         q_decoder_h = doc_encoder_h.view(1, batch_size, -1)
@@ -163,6 +178,8 @@ def train_epoch(train_data, epoch):
 
     print('Average Loss after Epoch %d : %.4f' %(epoch, avg_loss/num_batches))
     print("Epoch time: {:.2f}s".format(time.time() - epoch_begin_time))
+
+
 
 
 def evaluate(data, generate=False):
@@ -193,6 +210,13 @@ def evaluate(data, generate=False):
         # Supervised Learning of "part of Answer" prediction
         doc_token = Variable(torch.from_numpy(batch['document_tokens']))
         answer_target = Variable(torch.from_numpy(batch['answer_labels']).float())
+
+        if args.gpu:
+            doc_encoder_h = doc_encoder_h.cuda()
+            doc_token = doc_token.cuda()
+            answer_target = answer_target.cuda()
+
+
         doc_embeddings = embedder(doc_token)
         # Adding additional dim. with answer tags
         doc_ans_embedding = torch.cat((doc_embeddings,answer_target.unsqueeze(-1)),dim=-1)
@@ -203,10 +227,17 @@ def evaluate(data, generate=False):
         # setting up decoder inputs and outputs
         q_in_tf = batch["question_input_tokens"]
         q_in_gen = np.full(q_in_tf[:,0].shape, look_up_word("<START>"))
-
-        q_embedded_in_tf = embedder(torch.from_numpy(q_in_tf).long())
-        q_embedded_in_gen = embedder(torch.from_numpy(q_in_gen).long()).unsqueeze(1)
         q_target = Variable(torch.from_numpy(batch["question_output_tokens"]).long())
+
+        q_in_tf_tensor = torch.from_numpy(q_in_tf).long()
+        q_in_gen_tensor = torch.from_numpy(q_in_gen).long()
+        if args.gpu:
+            q_in_tf_tensor = q_in_tf_tensor.cuda()
+            q_in_gen_tensor = q_in_gen_tensor.cuda()
+            q_target = q_target.cuda()
+
+        q_embedded_in_tf = embedder(q_in_tf_tensor)
+        q_embedded_in_gen = embedder(q_in_gen_tensor).unsqueeze(1)
 
         # Pass encoder hidden
         q_decoder_h = doc_encoder_h.view(1, batch_size, -1)
@@ -222,8 +253,13 @@ def evaluate(data, generate=False):
             q_decoder_out_tf, q_decoder_h_tf =  q_decoder(q_embedded_in_tf[:,q_len:q_len+1,:], q_decoder_h_tf)
             # full gen:
             q_decoder_out_gen, q_decoder_h_gen =  q_decoder(q_embedded_in_gen, q_decoder_h_gen)
-            q_out = np.argmax(q_decoder_out_gen.squeeze().data.numpy(), axis=1)
+            if args.gpu:
+                q_out = np.argmax(q_decoder_out_gen.squeeze().cpu().data.numpy(), axis=1)
+            else:
+                q_out = np.argmax(q_decoder_out_gen.squeeze().data.numpy(), axis=1)
             q_in_gen = torch.from_numpy(q_out).long()
+            if args.gpu:
+                q_in_gen = q_in_gen.cuda()
             q_embedded_in_gen = embedder(q_in_gen).unsqueeze(1)
 
             # losses
@@ -235,7 +271,11 @@ def evaluate(data, generate=False):
                 q_gen['gt'][i,:,q_len] = np.array([look_up_token(j) for j in q_in_tf[:,q_len]])
                 q_gen['full_gen'][i,:,q_len] = np.array([look_up_token(j) for j in q_out])
 
-                q_out = np.argmax(q_decoder_out_tf.squeeze().data.numpy(), axis=1)
+                if args.gpu:
+                    q_out = np.argmax(q_decoder_out_tf.squeeze().cpu().data.numpy(), axis=1)
+                else:
+                    q_out = np.argmax(q_decoder_out_tf.squeeze().data.numpy(), axis=1)
+
                 q_gen['tf_gen'][i,:,q_len] = np.array([look_up_token(j) for j in q_out])
 
 
