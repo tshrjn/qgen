@@ -18,7 +18,7 @@ from utils import *
 
 
 parser = argparse.ArgumentParser(description='PyTorch QGen')
-parser.add_argument('--num_epochs', default=100, type=int,
+parser.add_argument('--num_epochs', default=25, type=int,
                     help='number of training epochs')
 parser.add_argument('--seed', type=int, default=42,
                     help='Random Seed')
@@ -59,7 +59,10 @@ parser.add_argument('--no_train', action='store_true', default=False,
 parser.add_argument('--no_eval', action='store_true', default=False,
                     help="don't evaluate")
 parser.add_argument('--gen', action='store_true', default=False,
-                    help="Generate Questions")
+                    help="Print Generated Questions")
+parser.add_argument('--word_tf', action='store_true', default=False,
+                    help="whether to use word or sentence based teacher forcing")
+
 
 args = parser.parse_args()
 print(args)
@@ -80,6 +83,7 @@ else:
 
 print("Number of batches = ", num_batches)
 max_doc_len = batches[0]['document_tokens'].shape[1]
+max_q_len = batches[0]['question_input_tokens'].shape[1]
 
 
 def look_up_word(word):
@@ -110,6 +114,7 @@ train_params = [ *list(doc_encoder.parameters()), *list(q_encoder.parameters()),
 optimizer = torch.optim.Adam(train_params, lr=args.lr)
 a_criterion = nn.BCELoss()
 q_criterion = nn.NLLLoss()
+
 
 def train_epoch(train_data, epoch):
     doc_encoder.train()
@@ -177,18 +182,33 @@ def train_epoch(train_data, epoch):
         # Set q_loss = 0 for batch
         q_loss = 0
 
-        use_teacher_forcing = True if random.random() < args.tf_ratio else False
+        # Alternate between either word based or sentence based teacher forcing
+        if args.word_tf:
+            for q_len in range(max_q_len):
+                use_teacher_forcing = True if random.random() < args.tf_ratio else False
+                if use_teacher_forcing:
+                    q_embedded_in = q_embedded_in_tf[:,q_len:q_len+1,:]
+                    q_decoder_out, q_decoder_h = q_decoder(q_embedded_in, q_decoder_h)
+                else:
+                    q_decoder_out, q_decoder_h =  q_decoder(q_embedded_in, q_decoder_h)
+                    _, q_in = q_decoder_out.max(2)
+                    q_embedded_in = embedder(q_in)
 
-        if use_teacher_forcing:
-            for q_len in range(q_embedded_in_tf.shape[1]):
-                q_decoder_out, q_decoder_h =  q_decoder(q_embedded_in_tf[:,q_len:q_len+1,:], q_decoder_h)
                 q_loss += q_criterion(q_decoder_out.squeeze(), q_target[:,q_len:q_len+1].squeeze())
+
         else:
-            for q_len in range(q_embedded_in.shape[1]):
-                q_decoder_out, q_decoder_h =  q_decoder(q_embedded_in, q_decoder_h)
-                q_loss += q_criterion(q_decoder_out.squeeze(), q_target[:,q_len:q_len+1].squeeze())
-                _, q_in = q_decoder_out.max(2)
-                q_embedded_in = embedder(q_in)
+            use_teacher_forcing = True if random.random() < args.tf_ratio else False
+
+            if use_teacher_forcing:
+                for q_len in range(max_q_len):
+                    q_decoder_out, q_decoder_h =  q_decoder(q_embedded_in_tf[:,q_len:q_len+1,:], q_decoder_h)
+                    q_loss += q_criterion(q_decoder_out.squeeze(), q_target[:,q_len:q_len+1].squeeze())
+            else:
+                for q_len in range(max_q_len):
+                    q_decoder_out, q_decoder_h =  q_decoder(q_embedded_in, q_decoder_h)
+                    q_loss += q_criterion(q_decoder_out.squeeze(), q_target[:,q_len:q_len+1].squeeze())
+                    _, q_in = q_decoder_out.max(2)
+                    q_embedded_in = embedder(q_in)
 
         # loss = q_loss + a_loss
         loss = q_loss

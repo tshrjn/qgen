@@ -9,7 +9,7 @@ class WordEmbedder(nn.Module):
         super(WordEmbedder, self).__init__()
         self.input_size, self.output_size = wt_params.shape
         self.embedding = nn.Embedding(self.input_size, self.output_size)
-        
+
         # TODO: Verify
         self.embedding.weight = nn.Parameter(torch.from_numpy(wt_params).float())
         self.embedding.weight.requires_grad = False
@@ -23,13 +23,14 @@ class BaseRNN(nn.Module):
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.bidirectional = bidirectional
+        self.num_directions = 2 if bidirectional else 1
 
         self.gru = nn.GRU(input_size, hidden_size, batch_first= True, bidirectional=self.bidirectional)
-        
+
     def forward(self, x, hidden):
         output, hidden = self.gru(x, hidden)
         return output, hidden
-    
+
 
 class DocumentEncoder(BaseRNN):
     def __init__(self, input_size, hidden_size, num_layers=1, bidirectional=False):
@@ -46,7 +47,7 @@ class DocumentEncoder(BaseRNN):
 class QuestionDecoder(BaseRNN):
     def __init__(self, input_size, hidden_size, output_size, num_layers=1, bidirectional=False):
         super(QuestionDecoder, self).__init__(input_size, hidden_size, num_layers, bidirectional)
-        self.fc = nn.Linear(input_size, output_size) 
+        self.fc = nn.Linear(input_size, output_size)
 
     def forward(self, x, h):
         o, h = self.gru(x, h)
