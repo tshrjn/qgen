@@ -1,5 +1,12 @@
 import pickle
 
+def display_models(list_models):
+    print('='*100)
+    print('Model log:\n')
+    for model in list_models:
+        print(model)
+    print('='*100 + '\n')
+
 def display_generated(q_gen):
     num_batches, batch_size, max_q_len = q_gen['gt'].shape
     for i in range(num_batches):

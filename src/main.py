@@ -58,12 +58,16 @@ parser.add_argument('--no_train', action='store_true', default=False,
                     help="don't start training")
 parser.add_argument('--no_eval', action='store_true', default=False,
                     help="don't evaluate")
-parser.add_argument('--gen', action='store_true', default=False,
-                    help="Print Generated Questions")
 parser.add_argument('--word_tf', action='store_true', default=False,
                     help="whether to use word or sentence based teacher forcing")
 parser.add_argument('--unmasked_loss', action='store_true', default=False,
                     help="whether to use masked NLLLoss")
+parser.add_argument('--rnn_type', default='LSTM', type=str,
+                    help="type of rnn to use")
+# Display options
+parser.add_argument('--gen', action='store_true', default=False,
+                    help="Print Generated Questions")
+
 
 
 args = parser.parse_args()
@@ -97,13 +101,13 @@ def look_up_token(token):
 
 # Input: word token -> embedding
 embedder = WordEmbedder(glove)
-# embedding +ans -> ans_pred, encoded_doc, encoded_doc_h (2 * given hidden due to biLSTM)
-doc_encoder = DocumentEncoder(embedder.output_size + 1, args.hidden_size, num_layers=1, bidirectional=True)
+# doc embedding + ans_tags -> ans_pred, encoded_doc, encoded_doc_h (2 * given hidden due to bidirection)
+doc_encoder = DocumentEncoder(embedder.output_size + 1, args.hidden_size, rnn_type=args.rnn_type, num_layers=2, dropout=0.3, bidirectional=True)
 # encoded_doc, encoded_doc_h -> doubly encoded_doc, doubly_encoded_doc_h
-q_encoder = BaseRNN(doc_encoder.output_size, 2*args.hidden_size)
+q_encoder = BaseRNN(doc_encoder.output_size, args.hidden_size * doc_encoder.num_layers, rnn_type=args.rnn_type)
 # Most experimentation would be in input to DECODER
-# doubly_encoded_doc_h + (context vec + encoder hidden), q_embedding -> qgen_dec_pred, qgen_dec_h
-q_decoder = QuestionDecoder(embedder.output_size, 2*args.hidden_size, embedder.input_size)
+# doubly_encoded_doc_h + context vec + encoder hidden, q_embedding -> qgen_dec_pred, qgen_dec_h
+q_decoder = QuestionDecoder(embedder.output_size , args.hidden_size * doc_encoder.num_layers , embedder.input_size, rnn_type=args.rnn_type)
 
 if args.gpu:
     embedder.cuda()
@@ -111,11 +115,13 @@ if args.gpu:
     q_encoder.cuda()
     q_decoder.cuda()
 
+display_models([embedder, doc_encoder, q_encoder, q_decoder])
 
 train_params = [ *list(doc_encoder.parameters()), *list(q_encoder.parameters()), *list(q_decoder.parameters()) ]
 optimizer = torch.optim.Adam(train_params, lr=args.lr)
 a_criterion = nn.BCELoss()
 q_criterion =  nn.NLLLoss() if args.unmasked_loss else MaskedNLLLoss()
+
 
 def train_epoch(train_data, epoch):
     doc_encoder.train()
@@ -136,8 +142,10 @@ def train_epoch(train_data, epoch):
         optimizer.zero_grad()
 
         # make hidden zero for doc encoder
-        dim1 = 2 if doc_encoder.bidirectional else 1
-        doc_encoder_h = Variable(torch.zeros(dim1, batch_size, doc_encoder.hidden_size))
+        if args.rnn_type == 'GRU':
+            doc_encoder_h = Variable(torch.zeros(doc_encoder.num_directions * doc_encoder.num_layers, batch_size, doc_encoder.hidden_size))
+        elif args.rnn_type == 'LSTM':
+            doc_encoder_h = Variable(torch.zeros(2, doc_encoder.num_directions * doc_encoder.num_layers, batch_size, doc_encoder.hidden_size))
 
         # TODO: Doc mask & Question Mask
         # t_document_mask = Variable(torch.from_numpy(mask)).float()
@@ -178,7 +186,11 @@ def train_epoch(train_data, epoch):
 
 
         # Pass encoder hidden
-        q_decoder_h = doc_encoder_h.view(1, batch_size, -1)
+        if args.rnn_type == 'GRU':
+            q_decoder_h = doc_encoder_h.view(q_decoder.num_directions * q_decoder.num_layers, batch_size, -1)
+        elif args.rnn_type == 'LSTM':
+            q_decoder_h = (doc_encoder_h[0].view(1, batch_size, -1), doc_encoder_h[1].view(1, batch_size, -1))
+
 
         # Set q_loss = 0 for batch
         q_loss = 0
@@ -200,16 +212,15 @@ def train_epoch(train_data, epoch):
         else:
             use_teacher_forcing = True if random.random() < args.tf_ratio else False
 
-            if use_teacher_forcing:
-                for q_len in range(max_q_len):
+            for q_len in range(max_q_len):
+                if use_teacher_forcing:
                     q_decoder_out, q_decoder_h =  q_decoder(q_embedded_in_tf[:,q_len:q_len+1,:], q_decoder_h)
-                    q_loss += q_criterion(q_decoder_out.squeeze(), q_target[:,q_len:q_len+1].squeeze())
-            else:
-                for q_len in range(max_q_len):
+                else:
                     q_decoder_out, q_decoder_h =  q_decoder(q_embedded_in, q_decoder_h)
-                    q_loss += q_criterion(q_decoder_out.squeeze(), q_target[:,q_len:q_len+1].squeeze())
                     _, q_in = q_decoder_out.max(2)
                     q_embedded_in = embedder(q_in)
+
+                q_loss += q_criterion(q_decoder_out.squeeze(), q_target[:,q_len:q_len+1].squeeze())
 
         # loss = q_loss + a_loss
         loss = q_loss
@@ -223,6 +234,7 @@ def train_epoch(train_data, epoch):
 
     print('Average Loss after Epoch %d : %.4f' %(epoch, avg_loss/num_batches))
     print("Epoch time: {:.2f}s".format(time.time() - epoch_begin_time))
+    return q_loss
 
 
 
