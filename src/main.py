@@ -62,6 +62,8 @@ parser.add_argument('--gen', action='store_true', default=False,
                     help="Print Generated Questions")
 parser.add_argument('--word_tf', action='store_true', default=False,
                     help="whether to use word or sentence based teacher forcing")
+parser.add_argument('--unmasked_loss', action='store_true', default=False,
+                    help="whether to use masked NLLLoss")
 
 
 args = parser.parse_args()
@@ -113,8 +115,7 @@ if args.gpu:
 train_params = [ *list(doc_encoder.parameters()), *list(q_encoder.parameters()), *list(q_decoder.parameters()) ]
 optimizer = torch.optim.Adam(train_params, lr=args.lr)
 a_criterion = nn.BCELoss()
-q_criterion = nn.NLLLoss()
-
+q_criterion = MaskedNLLLoss() if args.unmasked else nn.NLLLoss()
 
 def train_epoch(train_data, epoch):
     doc_encoder.train()
@@ -291,7 +292,7 @@ def evaluate(data, generate=False):
         # Set q_loss = 0 for batch
         q_loss_tf = 0
         q_loss_gen = 0
-        for q_len in range(q_embedded_in_tf.shape[1]):
+        for q_len in range(max_q_len):
             # teacher forcing
             q_decoder_out_tf, q_decoder_h_tf =  q_decoder(q_embedded_in_tf[:,q_len:q_len+1,:], q_decoder_h_tf)
             # full gen:

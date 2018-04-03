@@ -3,6 +3,7 @@ import torch.nn.functional as F
 from torch import nn
 from torch.autograd import Variable
 
+END_TOKEN = 2
 
 class WordEmbedder(nn.Module):
     def __init__(self, wt_params):
@@ -54,3 +55,21 @@ class QuestionDecoder(BaseRNN):
         x = self.fc(x)
         x = F.log_softmax(x, dim=-1)
         return x, h
+
+def _assert_no_grad(variable):
+    assert not variable.requires_grad, \
+        "nn criterions don't compute the gradient w.r.t. targets - please " \
+        "mark these variables as not requiring gradients"
+
+class MaskedNLLLoss(nn.NLLLoss):
+    def __init__(self, weight=None, size_average=True, ignore_index=-100, reduce=False):
+        super(MaskedNLLLoss, self).__init__(weight, size_average, ignore_index, reduce)
+
+    def forward(self, input, target):
+        _assert_no_grad(target)
+        curr_loss = F.nll_loss(input, target, self.weight, self.size_average, self.ignore_index, self.reduce)
+        loss_mask = target == END_TOKEN
+        loss_mask = loss_mask.float()
+        curr_loss = curr_loss * loss_mask
+        curr_loss = curr_loss.sum() / len(loss_mask)
+        return curr_loss
