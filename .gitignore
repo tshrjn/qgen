@@ -1,7 +1,12 @@
+#compiled
+*.pyc
+
+.ipynb_checkpoints/*
 __pycache__/*
 *.txt
 *.json
 
 # saved model files
 model-*
-
+*.pt
+*.pkl
