@@ -63,6 +63,9 @@ parser.add_argument('--gen', action='store_true', default=False,
 args = parser.parse_args()
 print(args)
 
+max_doc_len = batches[0]['document_tokens'].shape[1]
+
+
 np.random.seed(args.seed)
 torch.manual_seed(args.seed)
 args.gpu = args.gpu and torch.cuda.is_available()
