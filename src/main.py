@@ -6,6 +6,7 @@ import os
 import json
 import time
 import argparse
+import random
 
 # 3rd party modules
 import torch
@@ -63,9 +64,6 @@ parser.add_argument('--gen', action='store_true', default=False,
 args = parser.parse_args()
 print(args)
 
-max_doc_len = batches[0]['document_tokens'].shape[1]
-
-
 np.random.seed(args.seed)
 torch.manual_seed(args.seed)
 args.gpu = args.gpu and torch.cuda.is_available()
@@ -81,6 +79,9 @@ else:
         save_obj((batches, num_batches, glove, _word_to_idx, _idx_to_word), args.save_data)
 
 print("Number of batches = ", num_batches)
+max_doc_len = batches[0]['document_tokens'].shape[1]
+
+
 def look_up_word(word):
     return _word_to_idx.get(word, UNKNOWN_TOKEN)
 
@@ -153,21 +154,41 @@ def train_epoch(train_data, epoch):
         answer_pred, doc_encoded, doc_encoder_h = doc_encoder(doc_ans_embedding, doc_encoder_h)
         a_loss = a_criterion(answer_pred.squeeze(), answer_target)
 
-        q_in = torch.from_numpy(batch["question_input_tokens"]).long()
+        # q_in for teacher forcing
+        q_in_tf = torch.from_numpy(batch["question_input_tokens"]).long()
+        # q_in for non-teacher forcing
+        q_in = torch.from_numpy(np.full(q_in_tf[:,0].shape, look_up_word("<START>"))).long()
+        q_in = q_in.unsqueeze(1)
+
+        # q word targets for Sup. Learning
         q_target = Variable(torch.from_numpy(batch["question_output_tokens"]).long())
         if args.gpu:
+            q_in_tf = q_in_tf.cuda()
             q_in = q_in.cuda()
             q_target = q_target.cuda()
+
         q_embedded_in = embedder(q_in)
+        q_embedded_in_tf = embedder(q_in_tf)
+
 
         # Pass encoder hidden
         q_decoder_h = doc_encoder_h.view(1, batch_size, -1)
 
         # Set q_loss = 0 for batch
         q_loss = 0
-        for q_len in range(q_embedded_in.shape[1]):
-            q_decoder_out, q_decoder_h =  q_decoder(q_embedded_in[:,q_len:q_len+1,:], q_decoder_h)
-            q_loss += q_criterion(q_decoder_out.squeeze(), q_target[:,q_len:q_len+1].squeeze())
+
+        use_teacher_forcing = True if random.random() < args.tf_ratio else False
+
+        if use_teacher_forcing:
+            for q_len in range(q_embedded_in_tf.shape[1]):
+                q_decoder_out, q_decoder_h =  q_decoder(q_embedded_in_tf[:,q_len:q_len+1,:], q_decoder_h)
+                q_loss += q_criterion(q_decoder_out.squeeze(), q_target[:,q_len:q_len+1].squeeze())
+        else:
+            for q_len in range(q_embedded_in.shape[1]):
+                q_decoder_out, q_decoder_h =  q_decoder(q_embedded_in, q_decoder_h)
+                q_loss += q_criterion(q_decoder_out.squeeze(), q_target[:,q_len:q_len+1].squeeze())
+                _, q_in = q_decoder_out.max(2)
+                q_embedded_in = embedder(q_in)
 
         # loss = q_loss + a_loss
         loss = q_loss
@@ -181,7 +202,6 @@ def train_epoch(train_data, epoch):
 
     print('Average Loss after Epoch %d : %.4f' %(epoch, avg_loss/num_batches))
     print("Epoch time: {:.2f}s".format(time.time() - epoch_begin_time))
-
 
 
 
