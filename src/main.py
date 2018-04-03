@@ -344,7 +344,7 @@ if not args.no_train:
         train_epoch(batches[:split], ep)
         # Eval after each epoch from randomly chosen batch of val set
         b = [np.random.choice(batches[split:-1])]
-        evaluate(b, generate=False)
+        evaluate(b, generate=args.gen)
 
 if args.save != '':
     save(args.save)
