@@ -14,9 +14,10 @@ import torch
 
 # Custom modules
 from losses import MaskedNLLLoss, Perplexity
-from models import *
-from data_utils import *
 from utils import *
+from models import *
+from constants import *
+from data_utils import *
 
 
 parser = argparse.ArgumentParser(description='PyTorch QGen')
@@ -29,7 +30,7 @@ parser.add_argument('--batch_size', type=int, default=32,
 parser.add_argument('--gpu', action='store_true', default=False,
                     help='Use GPU')
 # Dataset related
-parser.add_argument('--train_data', default='../train-v1.1.json', type=str,
+parser.add_argument('--train_data', default='../data/squad/train-v1.1.json', type=str,
                     help='path to train data')
 parser.add_argument('--glove_path', default='/Users/tshrjn/glove/glove.6B.200d.txt', type=str,
                     help='path to train data')
@@ -235,7 +236,7 @@ def train_epoch(train_data, epoch):
         avg_loss+= loss.data[0]
 
         print ('Batch: %d \t Epoch : %d\tNet Loss: %.4f \tAnswer Loss: %.4f \tQuestion Loss: %.4f'
-               %(i, epoch+1, loss.data[0], a_loss.data[0], q_loss.data[0]))
+               %(i+1, epoch+1, loss.data[0], a_loss.data[0], q_loss.data[0]))
 
     print('Average Loss after Epoch %d : %.4f' %(epoch+1, avg_loss/num_batches))
     print("Epoch time: {:.2f}s".format(time.time() - epoch_begin_time))
@@ -243,7 +244,10 @@ def train_epoch(train_data, epoch):
 
 
 def evaluate(data, generate=False):
-    print("Evaluating:")
+    if len(data) ==0:
+        return
+
+    print("Evaluation has begun.")
     doc_encoder.eval()
     q_encoder.eval()
     q_decoder.eval()
@@ -334,7 +338,7 @@ def evaluate(data, generate=False):
 
             # Perplexity on teacher forcing (to see how well the language model is doing.)
             p_l, p_n = perp(q_decoder_out_tf.squeeze(), q_target[:,q_len:q_len+1].squeeze())
-            p_loss += p_l
+            p_loss += p_l.data[0]
             p_norm_term += p_n
 
             # storing for printing later
@@ -347,14 +351,14 @@ def evaluate(data, generate=False):
 
 
         print ('Batch: %d\tQuestion Loss (teacher forcing): %.4f\tQuestion Loss (full generated): %.4f'
-                   %(i, q_loss_tf.data[0], q_loss_gen.data[0]))
+                   %(i+1, q_loss_tf.data[0], q_loss_gen.data[0]))
 
         batch_loss+= q_loss_gen.data[0]
 
     print('Average loss (full gen): %.4f' %( batch_loss/len(data)))
 
     p_loss /= (p_norm_term + 1e-8)
-    if p_loss.data[0] > Perplexity._MAX_EXP:
+    if p_loss > Perplexity._MAX_EXP:
         print("WARNING: Loss exceeded maximum value, capping to e^100")
         print("Perplexity: {:.4f}".format(math.exp(Perplexity._MAX_EXP)))
     else:
