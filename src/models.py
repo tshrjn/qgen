@@ -3,7 +3,6 @@ import torch.nn.functional as F
 from torch import nn
 from torch.autograd import Variable
 
-END_TOKEN = 2
 
 class WordEmbedder(nn.Module):
     def __init__(self, wt_params):
@@ -35,13 +34,20 @@ class BaseRNN(nn.Module):
         self.hidden_size = hidden_size // self.num_directions
 
         self.rnn_type = rnn_type
-        self.rnn = getattr(nn, self.rnn_type)(
+        self._rnn = getattr(nn, self.rnn_type)(
                            input_size=self.input_size,
                            hidden_size=self.hidden_size,
                            num_layers=self.num_layers,
                            batch_first=self.batch_first,
                            dropout=self.dropout,
                            bidirectional=self.bidirectional)
+
+    def rnn(self, x, h):
+        if self.rnn_type == 'LSTM':
+            o, h = self._rnn(x, (h[0],h[1]))
+        elif self.rnn_type == 'GRU':
+            o, h = self._rnn(x, h)
+        return o, h
 
     def forward(self, x, hidden):
         '''
@@ -100,10 +106,7 @@ class DocumentEncoder(BaseRNN):
         self.fc = nn.Linear(self.output_size, 1)
 
     def forward(self,x ,h):
-        if self.rnn_type == 'LSTM':
-            o, h = self.rnn(x, (h[0],h[1]))
-        else:
-            o, h = self.rnn(x, h)
+        o, h = self.rnn(x, h)
         x = self.fc(o)
         x = F.sigmoid(x)
         return x, o, h
@@ -115,28 +118,7 @@ class QuestionDecoder(BaseRNN):
         self.fc = nn.Linear(input_size, output_size)
 
     def forward(self, x, h):
-        if self.rnn_type == 'LSTM':
-            o, h = self.rnn(x, (h[0],h[1]))
+        o, h = self.rnn(x, h)
         x = self.fc(x)
         x = F.log_softmax(x, dim=-1)
         return x, h
-
-
-
-def _assert_no_grad(variable):
-    assert not variable.requires_grad, \
-        "nn criterions don't compute the gradient w.r.t. targets - please " \
-        "mark these variables as not requiring gradients"
-
-class MaskedNLLLoss(nn.NLLLoss):
-    def __init__(self, weight=None, size_average=True, ignore_index=-100, reduce=False):
-        super(MaskedNLLLoss, self).__init__(weight, size_average, ignore_index, reduce)
-
-    def forward(self, input, target):
-        _assert_no_grad(target)
-        curr_loss = F.nll_loss(input, target, self.weight, self.size_average, self.ignore_index, self.reduce)
-        loss_mask = target == END_TOKEN
-        loss_mask = 1 - loss_mask.float()
-        curr_loss = curr_loss * loss_mask
-        curr_loss = curr_loss.sum() / loss_mask.sum()
-        return curr_loss
