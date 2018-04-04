@@ -52,20 +52,19 @@ class Attention(nn.Module):
         self.dropout_prob = dropout_prob
 
         self.attention_reduced = nn.Linear(self.hidden_size * 3, self.hidden_size* 2)
-        self.attention_combined = nn.Linear(self.max_document_length, self.hidden_size*2)
+        #self.attention_combined = nn.Linear(self.max_document_length, self.hidden_size*2)
         self.dropout = nn.Dropout(self.dropout_prob)
 
     def forward(self, question_input, hidden, encoder_outputs):
         hidden = self.dropout(hidden)
         concat = torch.cat((hidden.unsqueeze(0), question_input.unsqueeze(0)), 2)
-        concat.transpose(0,1)
-        concat = self.attention_reduced(concat)
-        attention_weights = F.softmax(concat, dim = 1)
+        concat = self.attention_reduced(concat.transpose(0,1))
+        attention_weights = F.softmax(concat, dim = 2)
         attention_weights = attention_weights.transpose(1,2)
-        attention_weights = attention_weights.transpose(0,2)
-        attention_applied = torch.bmm(encoder_outputs, attention_weights)
-        output = self.attention_combined(attention_applied.squeeze(2))
-        output = F.relu(output)
+        activations = torch.bmm(encoder_outputs, attention_weights)
+        activations = F.relu(activations)
+        output = torch.mul(encoder_outputs, activations)
+        output = torch.sum(output, dim=1)
         return(output,attention_weights)
 
 

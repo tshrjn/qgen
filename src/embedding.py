@@ -32,7 +32,7 @@ def look_up_token(token):
     return _idx_to_word[token]
 
 
-embeddings_path = os.path.realpath('/Users/tshrjn/glove/glove.6B.300d.txt')
+embeddings_path = os.path.realpath('/home/ra2630/NLU/glove.6B.300d.txt')
 with open(embeddings_path, encoding='utf-8') as f:
     line = f.readline()
     chunks = line.split(" ")

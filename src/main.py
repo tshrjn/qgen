@@ -49,6 +49,8 @@ parser.add_argument('--lr', type=float, default=3e-4,
                     help='Learning rate')
 parser.add_argument('--tf_ratio', type=float, default=1.0,
                     help='Teacher Forcing Ratio')
+parser.add_argument('--tf_ratio_decay_rate', type=float, default=1.0,
+                    help='Teacher Forcing Decay Rate')
 # Model
 parser.add_argument('--save', default='', type=str,
                     help='save the model after training')
@@ -156,6 +158,7 @@ def train_epoch(train_data, epoch):
     doc_encoder.train()
     q_encoder.train()
     q_decoder.train()
+    args.tf_ratio = args.tf_ratio * args.tf_ratio_decay_rate
 
     print("No. of batches in training data: {}, with batch_size: {} ".format(len(train_data), len(train_data[0]['document_tokens'])))
     epoch_begin_time = time.time()
@@ -365,13 +368,25 @@ def evaluate(data, generate=False):
         q_loss_gen = 0
         q_loss_tf_masked = 0
         q_loss_gen_masked = 0
-        logits = Variable(torch.zeros(args.batch_size, max_q_len, embedder.input_size), requires_grad = False)
+        logits_tf = Variable(torch.zeros(args.batch_size, max_q_len, embedder.input_size), requires_grad = False)
+        logits_gen = Variable(torch.zeros(args.batch_size, max_q_len, embedder.input_size), requires_grad = False)
         labels = Variable(torch.zeros(args.batch_size, max_q_len), requires_grad = False).long()
+        doc_lengths_for_mask = Variable(torch.from_numpy(batch['question_lengths'])).long()
+        if args.gpu:
+            logits_tf = logits_tf.cuda()
+            logits_gen = logits_gen.cuda()
+            labels = labels.cuda()
+            doc_lengths_for_mask = doc_lengths_for_mask.cuda()
+
         for q_len in range(q_embedded_in_tf.shape[1]):
+            labels[:,q_len:q_len+1] = q_target[:,q_len:q_len+1]
             # teacher forcing
             q_decoder_out_tf, q_decoder_h_tf =  q_decoder(q_embedded_in_tf[:,q_len:q_len+1,:], q_decoder_h_tf)
+            logits_tf[:,q_len:q_len+1,:] = q_decoder_out_tf
             # full gen:
             q_decoder_out_gen, q_decoder_h_gen =  q_decoder(q_embedded_in_gen, q_decoder_h_gen)
+            logits_gen[:,q_len:q_len+1,:] = q_decoder_out_gen
+
             if args.gpu:
                 q_out = np.argmax(q_decoder_out_gen.squeeze().cpu().data.numpy(), axis=1)
             else:
@@ -398,8 +413,12 @@ def evaluate(data, generate=False):
                 q_gen['tf_gen'][i,:,q_len] = np.array([look_up_token(j) for j in q_out])
 
 
+        q_loss_tf_masked = q_loss = customLoss(logits_tf, labels, doc_lengths_for_mask)
+        q_loss_gen_masked = q_loss = customLoss(logits_gen, labels, doc_lengths_for_mask)
         print ('Batch: %d\tQuestion Loss (teacher forcing): %.4f\tQuestion Loss (full generated): %.4f'
                    %(i, q_loss_tf.data[0], q_loss_gen.data[0]))
+        print ('Batch: %d\tQuestion Loss Masked(teacher forcing): %.4f\tQuestion Loss Masked(full generated): %.4f'
+                   %(i, q_loss_tf_masked.data[0], q_loss_gen_masked.data[0]))
 
         batch_loss+= q_loss_gen.data[0]
 
