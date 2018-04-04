@@ -3,10 +3,6 @@
 
 
 from embedding import *
-# from nltk.tokenize import ToktokTokenizer
-# toktok = ToktokTokenizer().tokenize
-# if True:
-#     word_tokenize = toktok
 def data_parse(args):
     import json
     import pickle
@@ -195,7 +191,6 @@ def data_parse(args):
     reduced_glove = np.array(reduced_glove)
     reduced_glove.shape
 
-
     print("No. of invalid words/examples:", invalid)
 
     # In[12]:
@@ -328,12 +323,10 @@ def data_parse(args):
 
     def createBatch(inputs,batch_size,shuffle=False):
         outputs = []
-
         num_batches = len(inputs[0]) // batch_size + 1
-
-        for i in range(num_batches-1):
-            start = 0
-
+        start = 0
+        for i in range(num_batches):
+            end = min(start+batch_size, len(inputs[0]))
             output = {'document_tokens':[],
                         'document_lengths':[],
                         'answer_labels_all':[],
@@ -342,29 +335,29 @@ def data_parse(args):
                         'question_input_tokens':[],
                         'question_output_tokens':[],
                         'question_lengths':[]}
-
             for index,inp in enumerate(inputs):
+
                 #maxD = max(inputs[1][start:start+batch_size])
                 maxD = max_document_len
                 maxA = max(inputs[4][start:start+batch_size])
                 maxQ = max_question_len
 
                 if index == 0:
-                    output['document_tokens'].append(inp[start:start+batch_size,0:maxD])
+                    output['document_tokens'].append(inp[start:end,0:maxD])
                 elif index==1:
-                    output['document_lengths'].append(inp[start:start+batch_size])
+                    output['document_lengths'].append(inp[start:end])
                 elif index==2:
-                    output['answer_labels_all'].append(inp[start:start+batch_size,0:maxD])
+                    output['answer_labels_all'].append(inp[start:end,0:maxD])
                 elif index==3:
-                    output['answer_labels'].append(inp[start:start+batch_size,0:maxD])
+                    output['answer_labels'].append(inp[start:end,0:maxD])
                 elif index==4:
-                    output['answer_lengths'].append(inp[start:start+batch_size])
+                    output['answer_lengths'].append(inp[start:end])
                 elif index==5:
-                    output['question_input_tokens'].append(inp[start:start+batch_size, 0:maxQ])
+                    output['question_input_tokens'].append(inp[start:end, 0:maxQ])
                 elif index==6:
-                    output['question_output_tokens'].append(inp[start:start+batch_size, 0:maxQ])
+                    output['question_output_tokens'].append(inp[start:end, 0:maxQ])
                 elif index==7:
-                    output['question_lengths'].append(inp[start:start+batch_size])
+                    output['question_lengths'].append(inp[start:end])
 
             output["document_tokens"] = np.array(output["document_tokens"])
             output["document_lengths"] = np.array(output["document_lengths"])
@@ -376,47 +369,6 @@ def data_parse(args):
             output["question_lengths"] = np.array(output["question_lengths"])
             outputs.append(output)
             start = start + batch_size
-
-        # Remaining training sample i.e. training mod batch_size
-        #maxD = max(inputs[1][start:])
-        maxD = max_document_len
-        maxA = max(inputs[4][start:])
-        maxQ = max_question_len
-        output = {'document_tokens':[],
-                    'document_lengths':[],
-                    'answer_labels_all':[],
-                    'answer_labels':[],
-                    'answer_lengths': [],
-                    'question_input_tokens':[],
-                    'question_output_tokens':[],
-                    'question_lengths':[]}
-        if index == 0:
-            output['document_tokens'].append(inp[start:,0:maxD])
-        elif index==1:
-            output['document_lengths'].append(inp[start:])
-        elif index==2:
-            output['answer_labels_all'].append(inp[start:,0:maxD])
-        elif index==3:
-            output['answer_labels'].append(inp[start:,0:maxD])
-        elif index==4:
-            output['answer_lengths'].append(inp[start:])
-        elif index==5:
-            output['question_input_tokens'].append(inp[start:, 0:maxQ])
-        elif index==6:
-            output['question_output_tokens'].append(inp[start:, 0:maxQ])
-        elif index==7:
-            output['question_lengths'].append(inp[start:])
-
-        output["document_tokens"] = np.array(output["document_tokens"])
-        output["document_lengths"] = np.array(output["document_lengths"])
-        output["answer_labels"] = np.array(output["answer_labels"])
-        output["answer_labels_all"] = np.array(output["answer_labels_all"])
-        output["answer_lengths"] = np.array(output["question_lengths"])
-        output["question_input_tokens"] = np.array(output["question_input_tokens"])
-        output["question_output_tokens"] = np.array(output["question_output_tokens"])
-        output["question_lengths"] = np.array(output["question_lengths"])
-
-        outputs.append(output)
 
         return outputs
 

@@ -93,6 +93,7 @@ else:
         save_obj((batches, num_batches, glove, _word_to_idx, _idx_to_word), args.save_data)
 
 print("Number of batches = ", num_batches)
+print("Glove Shape = ", glove.shape)
 max_doc_len = batches[0]['document_tokens'].shape[1]
 max_q_len = batches[0]['question_input_tokens'].shape[1]
 
