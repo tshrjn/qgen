@@ -4,6 +4,7 @@
 # Core modules
 import os
 import json
+import math
 import time
 import argparse
 import random
@@ -12,7 +13,7 @@ import random
 import torch
 
 # Custom modules
-from losses import MaskedNLLLoss
+from losses import MaskedNLLLoss, Perplexity
 from models import *
 from data_utils import *
 from utils import *
@@ -123,8 +124,8 @@ display_models([embedder, doc_encoder, q_encoder, q_decoder])
 train_params = [ *list(doc_encoder.parameters()), *list(q_encoder.parameters()), *list(q_decoder.parameters()) ]
 optimizer = torch.optim.Adam(train_params, lr=args.lr)
 a_criterion = nn.BCELoss()
-q_criterion =  nn.NLLLoss() if args.unmasked_loss else MaskedNLLLoss()
-
+q_criterion = nn.NLLLoss() if args.unmasked_loss else MaskedNLLLoss()
+perp = Perplexity()
 
 def train_epoch(train_data, epoch):
     doc_encoder.train()
@@ -256,6 +257,9 @@ def evaluate(data, generate=False):
 
     eval_begin_time = time.time()
     batch_loss = 0
+
+    p_loss = 0
+    p_norm_term = 0
     for i, batch in enumerate(data):
         # assert batch size
         batch_size = len(batch['document_tokens'])
@@ -328,6 +332,11 @@ def evaluate(data, generate=False):
             q_loss_tf += q_criterion(q_decoder_out_tf.squeeze(), q_target[:,q_len:q_len+1].squeeze())
             q_loss_gen += q_criterion(q_decoder_out_gen.squeeze(), q_target[:,q_len:q_len+1].squeeze())
 
+            # Perplexity on teacher forcing (to see how well the language model is doing.)
+            p_l, p_n = perp(q_decoder_out_tf.squeeze(), q_target[:,q_len:q_len+1].squeeze())
+            p_loss += p_l
+            p_norm_term += p_n
+
             # storing for printing later
             if generate:
                 q_gen['gt'][i,:,q_len] = np.array([look_up_token(j) for j in q_in_tf[:,q_len]])
@@ -343,8 +352,17 @@ def evaluate(data, generate=False):
         batch_loss+= q_loss_gen.data[0]
 
     print('Average loss (full gen): %.4f' %( batch_loss/len(data)))
-        # TODO: Eval Gen
+
+    p_loss /= (p_norm_term + 1e-8)
+    if p_loss.data[0] > Perplexity._MAX_EXP:
+        print("WARNING: Loss exceeded maximum value, capping to e^100")
+        print("Perplexity: {:.4f}".format(math.exp(Perplexity._MAX_EXP)))
+    else:
+        print("Perplexity: {:.4f}".format(math.exp(p_loss)))
+
+
     print("Eval time: {:.2f}s".format(time.time() - eval_begin_time))
+
     if generate:
         display_generated(q_gen)
 
@@ -378,13 +396,14 @@ split = int(args.split_ratio * len(batches))
 if not args.no_train:
     for ep in range(args.num_epochs):
         train_epoch(batches[:split], ep)
-        # Eval after each epoch from randomly chosen batch of val set
-        b = [np.random.choice(batches[split:-1])]
-        evaluate(b, generate=args.gen)
+        # Eval after each epoch on entire dev. set with teacher forcing
+        # for calculating the perplexity (from randomly chosen batch of val set)
+
+        # Eval & generate questions
+        if not args.no_eval:
+            evaluate(batches[split:-1], generate=args.gen)
+
 
 if args.save != '':
     save(args.save)
 
-# Eval & generate questions
-if not args.no_eval:
-    evaluate(batches[split:-1], generate=args.gen)
