@@ -35,7 +35,7 @@ parser.add_argument('--train_data', default='../data/squad/train-v1.1.json', typ
 parser.add_argument('--glove_path', default='/Users/tshrjn/glove/glove.6B.200d.txt', type=str,
                     help='path to train data')
 parser.add_argument('--words_to_take', type=int, default=2000,
-                    help='Size of reduced Glove (use 0 for full)')
+                    help='Size of reduced Glove (use 0 for full)') #400,000 for full glove
 parser.add_argument('--load_data', default='', type=str,
                     help='Load pickled data')
 parser.add_argument('--save_data', default='', type=str,

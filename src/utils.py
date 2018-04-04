@@ -10,6 +10,8 @@ def display_models(list_models):
 def display_generated(q_gen):
     num_batches, batch_size, max_q_len = q_gen['gt'].shape
     for i in range(num_batches):
+        if i%5:
+            continue
         for j in range(batch_size):
             print("T.F. Generated:", ' '.join(q_gen['tf_gen'][i,j]).replace('<END>',''))
             print("Full Generated:", ' '.join(q_gen['full_gen'][i,j]).replace('<END>',''))

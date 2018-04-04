@@ -37,9 +37,9 @@ def data_parse(args):
         for line in f:
             chunks = line.split(" ")
             idx = _add_word(chunks[0])
-            glove[idx] = [float(chunk) for chunk in chunks[1:]]
-            if len(_idx_to_word) >= vocab_size:
+            if idx >= vocab_size:
                 break
+            glove[idx] = [float(chunk) for chunk in chunks[1:]]
 
 
     import json
@@ -177,6 +177,8 @@ def data_parse(args):
 
     # In[189]:
 
+    if args.words_to_take == 0:
+        args.words_to_take  = len(glove)
 
     words = findKMostFrequentWords(min(len(glove), 3* args.words_to_take))
 
@@ -200,21 +202,21 @@ def data_parse(args):
     END_TOKEN = _add_word_reduced(END_WORD)
 
 
-
-
     dimensions = glove.shape[1]
     reduced_glove = []
     reduced_glove.append(np.zeros(dimensions))
     reduced_glove.append(-np.ones(dimensions))
     reduced_glove.append(np.ones(dimensions))
 
-    for word in words:
+    for i, word in enumerate(words):
         l = look_up_word(word)
         if(l != UNKNOWN_TOKEN):
             idx = _add_word_reduced(word)
             reduced_glove.append(glove[l])
             if(args.words_to_take!=0 and len(reduced_glove) == args.words_to_take):
                 break
+
+    print("No of words in (reduced) glove:", len(reduced_glove))
 
     def look_up_word_reduced(word):
         return _word_to_idx_reduced.get(word, UNKNOWN_TOKEN)
@@ -230,7 +232,6 @@ def data_parse(args):
     print("No. of invalid words/examples:", invalid)
 
     # In[12]:
-
 
     c = list(zip(X_train_comp_all,X_train_ans_all, Y_train_ques_all,X_train_comp_with_answer_marked_all, X_train_comp_answer_label_all))
     np.random.shuffle(c)

@@ -2,7 +2,6 @@ from torch import nn
 import torch.nn.functional as F
 
 from constants import END_TOKEN
-print("END_TOKEN", END_TOKEN)
 
 def _assert_no_grad(variable):
     assert not variable.requires_grad, \
