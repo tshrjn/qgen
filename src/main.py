@@ -60,8 +60,14 @@ parser.add_argument('--no_train', action='store_true', default=False,
                     help="don't start training")
 parser.add_argument('--no_eval', action='store_true', default=False,
                     help="don't evaluate")
-parser.add_argument('--gen', action='store_true', default=False,
-                    help="Print Generated Questions")
+parser.add_argument('--gen_test', action='store_true', default=False,
+                    help="Print Generated Questions on Test set")
+parser.add_argument('--gen_test_number', type=int, default=1,
+                    help='Number of examples to print for test set')
+parser.add_argument('--gen_train', action='store_true', default=False,
+                    help="Print Generated Questions on Train set")
+parser.add_argument('--gen_train_number', type=int, default=1,
+                    help='Number of examples to print for train set')
 parser.add_argument('--word_tf', action='store_true', default=False,
                     help="whether to use word or sentence based teacher forcing")
 parser.add_argument('--use_masked_loss', action='store_true', default=False,
@@ -300,7 +306,7 @@ def train_epoch(train_data, epoch):
 
 
 
-def evaluate(data, generate=False):
+def evaluate(data, num_examples=args.batch_size, generate=False):
     print("Evaluating:")
     doc_encoder.eval()
     q_encoder.eval()
@@ -426,7 +432,7 @@ def evaluate(data, generate=False):
         # TODO: Eval Gen
     print("Eval time: {:.2f}s".format(time.time() - eval_begin_time))
     if generate:
-        display_generated(q_gen)
+        display_generated(q_gen, num_examples)
 
 
 def save(path):
@@ -458,8 +464,15 @@ if not args.no_train:
     for ep in range(args.num_epochs):
         train_epoch(batches[:split], ep)
         # Eval after each epoch from randomly chosen batch of val set
-        b = [np.random.choice(batches[split:-1])]
-        evaluate(b, generate=args.gen)
+        b_test = [np.random.choice(batches[split:-1])]
+        if args.gen_test:
+            print("Test Data:")
+            evaluate(b_test,args.gen_test_number, generate=args.gen_test)
+       
+        if args.gen_test:
+            print("Train Data:") 
+            b_train = [np.random.choice(batches[0:split])]
+        evaluate(b_train,args.gen_train_number,  generate=args.gen_train)
 
 if args.save != '':
     save(args.save)
