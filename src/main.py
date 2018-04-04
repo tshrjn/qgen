@@ -12,6 +12,7 @@ import random
 import torch
 
 # Custom modules
+from losses import MaskedNLLLoss
 from models import *
 from data_utils import *
 from utils import *
@@ -29,6 +30,8 @@ parser.add_argument('--gpu', action='store_true', default=False,
 # Dataset related
 parser.add_argument('--train_data', default='../train-v1.1.json', type=str,
                     help='path to train data')
+parser.add_argument('--glove_path', default='/Users/tshrjn/glove/glove.6B.200d.txt', type=str,
+                    help='path to train data')
 parser.add_argument('--words_to_take', type=int, default=2000,
                     help='Size of reduced Glove (use 0 for full)')
 parser.add_argument('--load_data', default='', type=str,
@@ -39,7 +42,7 @@ parser.add_argument('--reduced_glove', action='store_true', default=False,
                     help='whether to use reduced_glove')
 parser.add_argument('--example_to_train', type=int, default=1000,
                     help='example taken to train (use 0 for full)')
-parser.add_argument('--split_ratio', type=float, default=0.8,
+parser.add_argument('--split_ratio', type=float, default=0.95,
                     help='ratio of training data')
 
 # Hyperparameters
@@ -63,7 +66,7 @@ parser.add_argument('--word_tf', action='store_true', default=False,
 parser.add_argument('--unmasked_loss', action='store_true', default=False,
                     help="whether to use masked NLLLoss")
 parser.add_argument('--rnn_type', default='LSTM', type=str,
-                    help="type of rnn to use")
+                    help="type of rnn to use. [GRU|LSTM]")
 # Display options
 parser.add_argument('--gen', action='store_true', default=False,
                     help="Print Generated Questions")
@@ -384,4 +387,4 @@ if args.save != '':
 
 # Eval & generate questions
 if not args.no_eval:
-    evaluate(batches[split:], generate=args.gen)
+    evaluate(batches[split:-1], generate=args.gen)
