@@ -323,9 +323,9 @@ def data_parse(args):
 
     def createBatch(inputs,batch_size,shuffle=False):
         outputs = []
-        num_batches = len(inputs[0]) // batch_size + 1
+        #num_batches = len(inputs[0]) // batch_size + 1
         start = 0
-        for i in range(num_batches):
+        while (start < len(inputs[0])):
             end = min(start+batch_size, len(inputs[0]))
             output = {'document_tokens':[],
                         'document_lengths':[],
@@ -335,13 +335,12 @@ def data_parse(args):
                         'question_input_tokens':[],
                         'question_output_tokens':[],
                         'question_lengths':[]}
+            #maxD = max(inputs[1][start:start+batch_size])
+            maxD = max_document_len
+            maxA = max(inputs[4][start:end])
+            maxQ = max_question_len
+
             for index,inp in enumerate(inputs):
-
-                #maxD = max(inputs[1][start:start+batch_size])
-                maxD = max_document_len
-                maxA = max(inputs[4][start:start+batch_size])
-                maxQ = max_question_len
-
                 if index == 0:
                     output['document_tokens'].append(inp[start:end,0:maxD])
                 elif index==1:
