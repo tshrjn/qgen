@@ -165,6 +165,7 @@ def train_epoch(train_data, epoch):
     doc_encoder.train()
     q_encoder.train()
     q_decoder.train()
+    attention.train()
     args.tf_ratio = args.tf_ratio * args.tf_ratio_decay_rate
 
     print("No. of batches in training data: {}, with batch_size: {} ".format(len(train_data), len(train_data[0]['document_tokens'])))
@@ -312,6 +313,7 @@ def evaluate(data, num_examples=args.batch_size, generate=False):
     doc_encoder.eval()
     q_encoder.eval()
     q_decoder.eval()
+    attention.eval()
 
     if generate:
         max_q_len = data[0]["question_input_tokens"].shape[1]
@@ -465,15 +467,15 @@ if not args.no_train:
     for ep in range(args.num_epochs):
         train_epoch(batches[:split], ep)
         # Eval after each epoch from randomly chosen batch of val set
-        b_test = [np.random.choice(batches[split:-1])]
         if args.gen_test:
+            b_test = [np.random.choice(batches[split:-1])]
             print("Test Data:")
             evaluate(b_test,args.gen_test_number, generate=args.gen_test)
        
-        if args.gen_test:
+        if args.gen_train:
             print("Train Data:") 
             b_train = [np.random.choice(batches[0:split])]
-        evaluate(b_train,args.gen_train_number,  generate=args.gen_train)
+            evaluate(b_train,args.gen_train_number,  generate=args.gen_train)
 
 if args.save != '':
     save(args.save)
